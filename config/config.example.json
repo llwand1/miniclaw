@@ -1,0 +1,48 @@
+{
+  "server": {
+    "port": 18791,
+    "host": "127.0.0.1"
+  },
+  "window": {
+    "main": {
+      "width": 960,
+      "height": 680
+    },
+    "floating": {
+      "width": 360,
+      "height": 480
+    }
+  },
+  "logging": {
+    "level": "info",
+    "file": true
+  },
+  "database": {
+    "path": "%APPDATA%/MiniClaw/miniclaw.db"
+  },
+  "data": {
+    "dir": "%APPDATA%/MiniClaw"
+  },
+  "providers": [
+    {
+      "id": "openai-default",
+      "type": "openai",
+      "name": "OpenAI",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "",
+      "defaultModel": "gpt-4o-mini",
+      "enabled": true
+    }
+  ],
+  "agents": [
+    {
+      "id": "default-agent",
+      "name": "默认助手",
+      "role": "assistant",
+      "providerId": "openai-default",
+      "model": "gpt-4o-mini",
+      "systemPrompt": "你是一个有用的AI助手。请用中文回答用户的问题。",
+      "enabled": true
+    }
+  ]
+}
