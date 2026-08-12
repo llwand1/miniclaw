@@ -10,7 +10,17 @@ export class OpenAICompatibleAdapter implements LLMAdapter {
     const url = `${baseUrl}/chat/completions`;
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 90_000);
+    // 外部中止信号（网关/用户「停止生成」）接管底层请求的取消：
+    // 桥接 req.signal 的 abort 事件到内部 controller，用户点击停止时 fetch 立即中断。
+    // 没有外部信号时退回内部兜底超时（120s，与网关 STREAM_TIMEOUT_MS 对齐），避免请求永久挂起。
+    let fallback: ReturnType<typeof setTimeout> | undefined;
+    const onExternalAbort = () => controller.abort();
+    if (req.signal) {
+      if (req.signal.aborted) controller.abort();
+      else req.signal.addEventListener('abort', onExternalAbort, { once: true });
+    } else {
+      fallback = setTimeout(() => controller.abort(), 120_000);
+    }
 
     try {
       const response = await fetch(url, {
@@ -96,7 +106,8 @@ export class OpenAICompatibleAdapter implements LLMAdapter {
 
       yield { content: '', done: true };
     } finally {
-      clearTimeout(timer);
+      if (fallback) clearTimeout(fallback);
+      if (req.signal) req.signal.removeEventListener('abort', onExternalAbort);
     }
   }
 
