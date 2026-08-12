@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>图解 MiniClaw 回复 UI · 渲染层契约</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#2b3440;
+    --ink:#e6edf3; --dim:#9aa7b4; --faint:#6b7684;
+    --accent:#4c9aff; --accent2:#7c5cff; --ok:#3fb950; --warn:#f0883e;
+    --red:#f85149; --gold:#e3b341; --cyan:#39c5cf; --purple:#a78bfa;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    --sans:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 700px at 50% -10%,#141c2b,var(--bg));
+    color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:980px;margin:0 auto;padding:32px 20px 80px}
+  header.hero{text-align:center;padding:24px 0 8px}
+  .badge{display:inline-block;font-family:var(--mono);font-size:12px;letter-spacing:.5px;
+    color:var(--accent);border:1px solid var(--border);border-radius:20px;padding:4px 14px;
+    background:var(--panel);margin-bottom:14px}
+  h1{font-size:32px;margin:6px 0 8px;font-weight:800;letter-spacing:.5px}
+  h1 .hl{background:linear-gradient(90deg,var(--accent),var(--accent2));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--dim);font-size:15px;margin:0}
+  nav.toc{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:22px 0 8px}
+  nav.toc a{font-size:13px;color:var(--dim);text-decoration:none;border:1px solid var(--border);
+    padding:6px 12px;border-radius:8px;background:var(--panel);transition:.2s}
+  nav.toc a:hover{color:var(--ink);border-color:var(--accent);transform:translateY(-1px)}
+  section{margin-top:40px;background:var(--panel);border:1px solid var(--border);
+    border-radius:16px;padding:26px 24px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+  .sec-head{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .sec-no{font-family:var(--mono);font-size:13px;font-weight:700;color:#0d1117;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none}
+  h2{font-size:21px;margin:0;font-weight:750}
+  .lead{color:var(--dim);font-size:14.5px;margin:6px 0 18px}
+  .stage{background:var(--panel2);border:1px solid var(--border);border-radius:12px;
+    padding:18px;margin:14px 0}
+  .ctrls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}
+  button.btn{font-family:var(--sans);font-size:13.5px;font-weight:600;cursor:pointer;
+    color:var(--ink);background:var(--panel);border:1px solid var(--border);
+    border-radius:9px;padding:9px 16px;transition:.15s}
+  button.btn:hover{border-color:var(--accent);color:#fff}
+  button.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));
+    border:none;color:#fff}
+  button.btn.primary:hover{filter:brightness(1.1)}
+  button.btn:disabled{opacity:.4;cursor:not-allowed}
+  .note{font-size:13.5px;color:var(--dim);background:#0d1117;border-left:3px solid var(--accent);
+    border-radius:0 8px 8px 0;padding:10px 14px;margin:14px 0}
+  .note b{color:var(--ink)}
+  .warnbox{border-left-color:var(--warn)}
+  .warnbox b{color:var(--warn)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:680px){.grid2{grid-template-columns:1fr}}
+  .card{background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:14px}
+  .card h4{margin:0 0 8px;font-size:14.5px}
+  .card.good{border-color:rgba(63,185,80,.4)}
+  .card.bad{border-color:rgba(248,81,73,.4)}
+  code{font-family:var(--mono);font-size:13px;background:#0d1117;border:1px solid var(--border);
+    padding:1px 6px;border-radius:5px;color:var(--cyan)}
+  pre{font-family:var(--mono);font-size:12.5px;background:#0d1117;border:1px solid var(--border);
+    border-radius:10px;padding:14px;overflow-x:auto;color:var(--ink);line-height:1.7;margin:0}
+  .kw{color:var(--accent2)} .ty{color:var(--cyan)} .st{color:var(--ok)} .cm{color:var(--faint)} .nu{color:var(--gold)}
+  svg{display:block;width:100%;height:auto}
+  .interview{margin-top:16px;border:1px dashed var(--border);border-radius:10px;padding:0;overflow:hidden}
+  .interview summary{cursor:pointer;padding:12px 16px;font-weight:650;font-size:14px;
+    background:#0d1117;color:var(--gold);list-style:none}
+  .interview summary::-webkit-details-marker{display:none}
+  .interview summary::before{content:"Q ";font-family:var(--mono);color:var(--warn)}
+  .interview[open] summary{border-bottom:1px solid var(--border)}
+  .interview .ans{padding:14px 16px;font-size:14px;color:var(--dim)}
+  .interview .ans b{color:var(--ink)}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:12px;
+    background:var(--panel2);color:var(--dim);border:1px solid var(--border);margin-left:8px}
+  footer{text-align:center;color:var(--faint);font-size:12.5px;margin-top:50px}
+  .flash{animation:flash .6s ease}
+  @keyframes flash{0%{filter:brightness(2.2)}100%{filter:brightness(1)}}
+  .stepline{font-family:var(--mono);font-size:13px;color:var(--gold);min-height:20px;margin-top:8px}
+
+  /* ===== 聊天 UI mock（Section 2 核心） ===== */
+  .chat{background:#0b0f16;border:1px solid var(--border);border-radius:14px;padding:18px;
+    max-height:560px;overflow:auto}
+  .msg{display:flex;gap:10px;margin:14px 0;align-items:flex-start}
+  .msg.user{flex-direction:row-reverse}
+  .avatar{width:32px;height:32px;border-radius:9px;flex:none;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0d1117}
+  .avatar.u{background:#263041;color:var(--dim)}
+  .bubble{max-width:80%;border-radius:14px;padding:12px 14px;border:1px solid var(--border);
+    background:var(--panel2);font-size:14px;line-height:1.65}
+  .msg.user .bubble{background:linear-gradient(135deg,rgba(76,154,255,.20),rgba(124,92,255,.18));
+    border-color:rgba(76,154,255,.4)}
+  .stagebar{display:flex;gap:8px;margin:6px 0 10px;flex-wrap:wrap}
+  .chip{display:flex;align-items:center;gap:6px;font-size:12px;font-family:var(--mono);
+    padding:5px 10px;border-radius:20px;border:1px solid var(--border);color:var(--dim);background:#0d1117}
+  .chip.active{color:var(--ink);border-color:var(--accent);background:rgba(76,154,255,.12)}
+  .chip.done{color:var(--ok);border-color:rgba(63,185,80,.4)}
+  .spin{width:12px;height:12px;border:2px solid var(--dim);border-top-color:var(--accent);
+    border-radius:50%;animation:spin .8s linear infinite;flex:none}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .reason{margin:8px 0;border:1px solid var(--border);border-radius:10px;background:#0d1117;overflow:hidden}
+  .reason summary{cursor:pointer;padding:8px 12px;font-size:12.5px;color:var(--purple);
+    background:#14101f;list-style:none;display:flex;gap:8px;align-items:center}
+  .reason summary::-webkit-details-marker{display:none}
+  .reason .rbody{padding:10px 12px;font-size:13px;color:var(--dim);white-space:pre-wrap}
+  .toolcard{margin:8px 0;border:1px solid var(--border);border-radius:10px;background:#0d1117;overflow:hidden}
+  .toolcard .th{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#101826;
+    border-bottom:1px solid var(--border);font-size:13px;color:var(--ink)}
+  .toolcard .tb{padding:10px 12px;font-size:12.5px}
+  .toolcard .lbl{color:var(--dim);font-size:11px;margin-bottom:4px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px}
+  .toolcard pre{font-size:12px;margin:0}
+  .md :where(h1,h2,h3){margin:10px 0 6px;line-height:1.3;color:var(--ink)}
+  .md h1{font-size:18px}.md h2{font-size:16px}.md h3{font-size:14.5px}
+  .md p{margin:6px 0}
+  .md ul{margin:6px 0;padding-left:20px}
+  .md li{margin:2px 0}
+  .md blockquote{margin:8px 0;padding:6px 12px;border-left:3px solid var(--accent);
+    background:#0d1117;color:var(--dim);border-radius:0 8px 8px 0}
+  .md code{font-family:var(--mono);font-size:12.5px;background:#0d1117;border:1px solid var(--border);
+    padding:1px 5px;border-radius:5px;color:var(--cyan)}
+  .md pre{background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:12px;overflow-x:auto;margin:8px 0}
+  .md pre code{border:none;background:none;padding:0;color:var(--ink)}
+  .md table.mdt{border-collapse:collapse;width:100%;margin:8px 0;font-size:12.5px}
+  .md table.mdt th,.md table.mdt td{border:1px solid var(--border);padding:4px 8px;text-align:left}
+  .md table.mdt th{background:#0d1117;color:var(--dim);font-weight:600}
+  .caret{display:inline-block;width:7px;height:15px;background:var(--accent);margin-left:2px;
+    vertical-align:-2px;animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* 事件契约卡片（Section 3） */
+  .evt{display:flex;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;
+    background:#0d1117;margin:8px 0}
+  .evt .ty{font-family:var(--mono);font-size:12.5px;color:var(--cyan);min-width:120px;font-weight:700}
+  .evt .ds{flex:1;font-size:13px;color:var(--dim)}
+  .evt .ds b{color:var(--ink)}
+  .evt pre{margin-top:6px;font-size:11.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="badge">MINICLAW 回复 UI · 渲染层契约图解</div>
+    <h1>AI 回复界面是<span class="hl">怎么炼成的</span></h1>
+    <p class="sub">对标 WorkBuddy 桌面/网页版：从「渲染层契约」→ 结构化事件流 → 组件化渲染，五块拼图，核心可交互演示</p>
+    <nav class="toc">
+      <a href="#s1">① 核心原理</a>
+      <a href="#s2">② 可交互演示</a>
+      <a href="#s3">③ 后端事件契约</a>
+      <a href="#s4">④ 前端组件规范</a>
+      <a href="#s5">⑤ 落地清单</a>
+    </nav>
+  </header>
+
+  <!-- ============ 分区 1：核心原理 ============ -->
+  <section id="s1">
+    <div class="sec-head"><div class="sec-no">1</div><h2>回复效果 ≠ 动画，而是一套「渲染层契约」<span class="tag">核心心智</span></h2></div>
+    <p class="lead">WorkBuddy / OpenCode 那种"会思考、会调工具、流式排版漂亮"的回复，<b>不是前端堆动画堆出来的</b>。真正的核心是：前后端约定一份<strong>事件形状契约</strong>——后端把 LLM 原始流切成结构化事件，前端按事件类型渲染对应组件。点下面按钮，看数据是怎么流动的。</p>
+
+    <div class="stage">
+      <svg viewBox="0 0 680 250" role="img" aria-label="渲染层管线">
+        <defs>
+          <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#4c9aff"/><stop offset="1" stop-color="#7c5cff"/>
+          </linearGradient>
+          <marker id="arw" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+            <path d="M0,0 L8,3 L0,6 Z" fill="#6b7684"/>
+          </marker>
+        </defs>
+        <!-- LLM -->
+        <rect id="rLLM" x="20" y="80" width="150" height="90" rx="14" fill="#0d1117" stroke="#2b3440" stroke-width="1.5"/>
+        <text x="95" y="118" text-anchor="middle" font-size="15" font-weight="700" fill="#e6edf3">LLM 模型</text>
+        <text x="95" y="140" text-anchor="middle" font-size="11.5" fill="#9aa7b4">原始 token +</text>
+        <text x="95" y="156" text-anchor="middle" font-size="11.5" fill="#9aa7b4">reasoning_content</text>
+        <!-- Gateway -->
+        <rect id="rGate" x="265" y="80" width="150" height="90" rx="14" fill="#0d1117" stroke="#2b3440" stroke-width="1.5"/>
+        <text x="340" y="112" text-anchor="middle" font-size="15" font-weight="700" fill="#e6edf3">Gateway</text>
+        <text x="340" y="134" text-anchor="middle" font-size="11.5" fill="#9aa7b4">解析 → 结构化</text>
+        <text x="340" y="150" text-anchor="middle" font-size="11.5" fill="#9aa7b4">事件流 (SSE)</text>
+        <!-- Frontend -->
+        <rect id="rFront" x="510" y="80" width="150" height="90" rx="14" fill="#0d1117" stroke="#2b3440" stroke-width="1.5"/>
+        <text x="585" y="112" text-anchor="middle" font-size="15" font-weight="700" fill="#e6edf3">Frontend</text>
+        <text x="585" y="134" text-anchor="middle" font-size="11.5" fill="#9aa7b4">按类型渲染</text>
+        <text x="585" y="150" text-anchor="middle" font-size="11.5" fill="#9aa7b4">富组件</text>
+        <!-- arrows -->
+        <line x1="172" y1="125" x2="262" y2="125" stroke="#6b7684" stroke-width="1.5" marker-end="url(#arw)"/>
+        <line x1="417" y1="125" x2="507" y2="125" stroke="#6b7684" stroke-width="1.5" marker-end="url(#arw)"/>
+        <text x="217" y="70" text-anchor="middle" font-size="11" fill="#6b7684" font-family="monospace">混在一起</text>
+        <text x="462" y="70" text-anchor="middle" font-size="11" fill="#6b7684" font-family="monospace">token / reasoning / tool_* / artifact</text>
+        <!-- 对比条 -->
+        <rect x="20" y="195" width="320" height="40" rx="8" fill="#1a0f12" stroke="#f85149" stroke-opacity=".4"/>
+        <text x="34" y="212" font-size="12" fill="#f85149">✗ 只吐 token → 前端只能纯文本 + 猜阶段</text>
+        <rect x="350" y="195" width="310" height="40" rx="8" fill="#0f1a12" stroke="#3fb950" stroke-opacity=".4"/>
+        <text x="364" y="212" font-size="12" fill="#3fb950">✓ 结构化事件 → 组件化富渲染</text>
+      </svg>
+    </div>
+
+    <div class="ctrls">
+      <button class="btn primary" id="s1play">▶ 播放数据流动</button>
+      <button class="btn" id="s1reset">重置</button>
+    </div>
+    <div class="stepline" id="s1step">点「播放数据流动」，看 LLM → Gateway → Frontend 的链路 ↑</div>
+
+    <div class="note warnbox"><b>关键认知：</b>我们之前那版只做了"token 流 + 前端猜阶段"，所以显得"哑"。真正的差距是中间这层<b>结构化事件契约</b>和<b>真正的 Markdown / 代码渲染</b>——这正是 Section 2 要演示的。</div>
+
+    <details class="interview">
+      <summary>为什么不能只靠 token 流，前端自己猜？</summary>
+      <div class="ans">因为<b>信息丢失</b>。纯 token 流里，思考过程、工具名、工具参数、工具结果、产物元数据全混成一段文本，前端无法区分，只能硬猜（我们之前就是这么干的，所以阶段条是"猜"出来的）。结构化事件让每个语义单元有独立形状，前端才能分别渲染成<b>思考块 / 工具卡片 / 代码高亮 / Artifact 预览</b>，且能精确控制动画与状态。</div>
+    </details>
+  </section>
+
+  <!-- ============ 分区 2：可交互演示（核心） ============ -->
+  <section id="s2">
+    <div class="sec-head"><div class="sec-no">2</div><h2>可交互演示：理想回复长什么样<span class="tag">最终产出原型</span></h2></div>
+    <p class="lead">下面是一段<strong>模拟的完整 AI 回复</strong>。点「▶ 播放一次完整回复」，你会看到后端按顺序吐出结构化事件，前端实时渲染：阶段指示条 → 可折叠思考块 → 实时工具卡片 → 流式 Markdown（标题/列表/代码高亮/表格）+ 打字光标。这就是我们对标 WorkBuddy 的"最终产出"视觉。</p>
+
+    <div class="stage">
+      <div class="chat" id="chat">
+        <!-- 用户消息 -->
+        <div class="msg user">
+          <div class="avatar u">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+          </div>
+          <div class="bubble">回复界面那种效果，到底是怎么实现的？</div>
+        </div>
+        <!-- 助手消息（由 JS 渲染） -->
+        <div class="msg">
+          <div class="avatar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1.5" fill="currentColor"/><path d="M9 13h.01M15 13h.01"/></svg>
+          </div>
+          <div class="bubble" id="asstBubble">
+            <div class="stagebar" id="stagebar"></div>
+            <details class="reason" id="reasonBox" open>
+              <summary>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a4 4 0 0 0-4 4 3 3 0 0 0-2 5 3 3 0 0 0 2 5 4 4 0 0 0 8 0 3 3 0 0 0 2-5 3 3 0 0 0-2-5 4 4 0 0 0-4-4z"/></svg>
+                思考过程
+              </summary>
+              <div class="rbody" id="reasonBody"></div>
+            </details>
+            <div class="toolcard" id="toolBox"></div>
+            <div class="md" id="answerBody"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ctrls">
+      <button class="btn primary" id="s2play">▶ 播放一次完整回复</button>
+      <button class="btn" id="s2reset">重置</button>
+    </div>
+    <div class="stepline" id="s2step">点「播放一次完整回复」，看事件如何驱动前端渲染 ↑</div>
+
+    <div class="note"><b>这就是"渲染层契约"的直观体现：</b>前端是一个<b>事件驱动的渲染器</b>（reducer + effect）。每次收到一个事件，只更新对应区块（思考块 append、工具卡实时翻转、回答区 append token），绝不重渲整页。所以你能看到"思考中→调工具→写回答"平滑过渡，而不是一次性蹦出整段文字。</div>
+
+    <details class="interview">
+      <summary>流式 Markdown 怎么做才不会"重播闪烁"？</summary>
+      <div class="ans">两个要点：① <b>按行分块 + 稳定 key</b>——把已输出的每一行用其在文本中的固定索引当 key，diff 时只渲染"新增的行"，已有行不复用重建，避免整段重新淡入；② <b>末尾 caret 单独放</b>，不计入正文 diff。我们之前那版用"整段重渲 + 每行淡入"会有重播感，正式版要改成稳定 key 分块。</div>
+    </details>
+  </section>
+
+  <!-- ============ 分区 3：后端事件契约 ============ -->
+  <section id="s3">
+    <div class="sec-head"><div class="sec-no">3</div><h2>后端契约：六种结构化 SSE 事件<span class="tag">SSE 形状</span></h2></div>
+    <p class="lead">Gateway 不吐裸 token，而是吐这六种带形状的事件。前端只认事件 type，不关心具体 UI。下面每个事件是真实 payload 示例（即 MiniClaw 的 <code>SSE-CONTRACT.md</code> 要扩展的目标）。
+
+    <div class="stage">
+      <div class="evt"><div class="ty">token</div><div class="ds"><b>正文增量</b>，前端 append 到 Markdown 渲染区。<pre>{ "type":"token", "content":"# 标题" }</pre></div></div>
+      <div class="evt"><div class="ty">reasoning</div><div class="ds"><b>推理过程增量</b>（DeepSeek-R1 / o-series 才有；非推理模型不返回，前端须容错）。<pre>{ "type":"reasoning", "content":"用户在问…" }</pre></div></div>
+      <div class="evt"><div class="ty">tool_call</div><div class="ds"><b>工具调用开始</b>，带结构化 name + arguments（不是字符串）。<pre>{ "type":"tool_call", "id":"t1", "name":"web_search", "arguments":{ "query":"…" } }</pre></div></div>
+      <div class="evt"><div class="ty">tool_result</div><div class="ds"><b>工具结果回填</b>，与 tool_call 同 id 关联，带耗时。<pre>{ "type":"tool_result", "id":"t1", "content":"…", "elapsed_ms":1240 }</pre></div></div>
+      <div class="evt"><div class="ty">artifact</div><div class="ds"><b>可预览产物</b>（HTML/文件/图表），前端开预览面板而非塞进正文。<pre>{ "type":"artifact", "id":"a1", "kind":"html", "title":"报告", "url":"…" }</pre></div></div>
+      <div class="evt"><div class="ty">stage</div><div class="ds"><b>阶段切换</b>（thinking / tool / answer），驱动顶部指示条。<pre>{ "type":"stage", "value":"tool" }</pre></div></div>
+    </div>
+
+    <div class="note warnbox"><b>为什么 reasoning 要单独成一个事件？</b>推理模型（R1/o-series）会把"思考"和"回答"拆成两个字段返回，且可能根本不返回（agnes 这类非推理模型）。把它独立成事件，前端才能决定"是否显示思考块"，而不会把推理文本混进正文。我们后端 adapter 已能解析 <code>reasoning_content</code>，只差让模型真的返回。</div>
+
+    <details class="interview">
+      <summary>tool_call / tool_result 为什么要用 id 关联，而不是一条消息？</summary>
+      <div class="ans">因为工具调用和结果是<strong>异步、可多并发</strong>的：一次回复可能并行调 3 个工具，每个先后返回。用 <code>id</code> 关联，前端才能把"哪个结果回填到哪张卡片"，并在结果到达前让卡片显示 spinner。若合成一条消息，就无法表达"调用中 / 已完成"的中间态，也无法并发。</div>
+    </details>
+  </section>
+
+  <!-- ============ 分区 4：前端组件规范 ============ -->
+  <section id="s4">
+    <div class="sec-head"><div class="sec-no">4</div><h2>前端规范：事件 → 组件映射 + 阶段状态机<span class="tag">渲染规则</span></h2></div>
+    <p class="lead">前端维护一个<strong>事件→组件</strong>的映射表，和一个<strong>阶段状态机</strong>。收到事件就 dispatch 到对应组件；stage 事件驱动顶部指示条在 思考中 → 调用工具 → 撰写回答 之间流转。
+
+    <div class="grid2">
+      <div class="card">
+        <h4>事件 → 组件</h4>
+        <pre><span class="kw">token</span>      → MarkdownStream（流式 + 高亮）
+<span class="kw">reasoning</span>  → ReasoningBlock（可折叠）
+<span class="kw">tool_call</span>  → ToolCard（参数 JSON）
+<span class="kw">tool_result</span>→ ToolCard.result（回填 + 耗时）
+<span class="kw">artifact</span>   → ArtifactPanel（预览）
+<span class="kw">stage</span>      → StageIndicator（三态）</pre>
+      </div>
+      <div class="card">
+        <h4>阶段状态机</h4>
+        <div class="stage" style="padding:10px;margin:0">
+          <svg viewBox="0 0 300 150" role="img" aria-label="阶段状态机">
+            <defs><marker id="ar2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#6b7684"/></marker></defs>
+            <circle id="cThink" cx="50" cy="75" r="30" fill="#0d1117" stroke="#2b3440" stroke-width="1.5"/>
+            <text x="50" y="79" text-anchor="middle" font-size="11" fill="#9aa7b4">思考中</text>
+            <circle id="cTool" cx="150" cy="75" r="30" fill="#0d1117" stroke="#2b3440" stroke-width="1.5"/>
+            <text x="150" y="79" text-anchor="middle" font-size="11" fill="#9aa7b4">调工具</text>
+            <circle id="cAns" cx="250" cy="75" r="30" fill="#0d1117" stroke="#2b3440" stroke-width="1.5"/>
+            <text x="250" y="79" text-anchor="middle" font-size="11" fill="#9aa7b4">写回答</text>
+            <line x1="82" y1="75" x2="118" y2="75" stroke="#6b7684" stroke-width="1.5" marker-end="url(#ar2)"/>
+            <line x1="182" y1="75" x2="218" y2="75" stroke="#6b7684" stroke-width="1.5" marker-end="url(#ar2)"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="ctrls">
+      <button class="btn primary" id="s4play">▶ 播放状态流转</button>
+      <button class="btn" id="s4reset">重置</button>
+    </div>
+    <div class="stepline" id="s4step">点「播放状态流转」，看 stage 事件如何驱动指示条 ↑</div>
+
+    <div class="note"><b>稳定 key 分块（防重播闪烁）：</b>MarkdownStream 把已输出文本按行切分，每行用固定索引做 key；diff 时只渲染新增行，旧行保持不动。这样流式追加像"打字机"，而不是每次整段重新淡入。</div>
+
+    <details class="interview">
+      <summary>ArtifactPanel 和普通回复正文有什么区别？</summary>
+      <div class="ans">正文是<strong>对话流的一部分</strong>（Markdown 文本）；Artifact 是<strong>独立、可复用的产物</strong>——一段 HTML、一个文件、一张图表。它不应该混在聊天气泡里滚动消失，而应放在侧边预览面板或独立标签页，支持<strong>反复查看 / 编辑 / 导出</strong>。WorkBuddy 的"artifact"就是此意。MiniClaw 目前完全没有这一层，是后续可补的亮点。</div>
+    </details>
+  </section>
+
+  <!-- ============ 分区 5：落地清单 ============ -->
+  <section id="s5">
+    <div class="sec-head"><div class="sec-no">5</div><h2>落地到 MiniClaw：现状 vs 要补<span class="tag">行动清单</span></h2></div>
+    <p class="lead">对照上面契约，MiniClaw 目前有什么、还差什么。绿色是已具备，红色是要补的。这部分可直接回填进 <code>docs/SSE-CONTRACT.md</code> 与 <code>docs/ARCHITECTURE.md</code>。</p>
+
+    <div class="grid2">
+      <div class="card good">
+        <h4>✅ 已具备</h4>
+        <ul style="font-size:13.5px;color:var(--dim);margin:6px 0;padding-left:18px;line-height:1.9">
+          <li>SSE 基础链路（token / trace / step / ping）</li>
+          <li>reasoning 解析已接（adapter 解析 <code>reasoning_content</code>）</li>
+          <li>前端 SSE 订阅 + 状态机雏形</li>
+          <li>工具调用以 trace-step 字符串展示</li>
+        </ul>
+      </div>
+      <div class="card bad">
+        <h4>❌ 还要补</h4>
+        <ul style="font-size:13.5px;color:var(--dim);margin:6px 0;padding-left:18px;line-height:1.9">
+          <li><b>真正的流式 Markdown 渲染器</b>（代码高亮 / 表格 / 列表）</li>
+          <li><b>结构化 tool_call / tool_result 事件</b>（现是字符串），前端 ToolCard</li>
+          <li><b>Artifact 事件 + ArtifactPanel 预览</b></li>
+          <li><b>稳定 key 分块</b>防流式重播闪烁</li>
+          <li>换推理模型验证 ReasoningBlock</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note"><b>正式版改动文件（建议）：</b>
+      <br>· 后端 <code>src/core/adapter/*.ts</code>：把工具调用拆成结构化 tool_call/tool_result 事件
+      <br>· 后端 <code>src/core/gateway/index.ts</code> + <code>src/office-server/index.ts</code>：emit 并广播上述事件
+      <br>· 前端 <code>src/office-web/src/pages/ChatPage.tsx</code>：引入 MarkdownStream / ToolCard / ArtifactPanel + 稳定 key 分块
+      <br>· 文档 <code>docs/SSE-CONTRACT.md</code>：补全 6 种事件形状
+    </div>
+
+    <details class="interview">
+      <summary>先对齐"最终产出"再写代码，有什么好处？</summary>
+      <div class="ans">避免像上一轮那样"跑偏"——我们先把<strong>事件契约 + 组件映射</strong>这层正式架构定下来（本 demo 就是契约的可视化），再写代码，所有前端组件都对着契约实现，后端按契约 emit。这样 Web 版和未来的 Electron 壳共用同一套，且换模型 / 加工具都只是"多一种事件"，不破坏 UI。也方便回填进正式文档，对接长期架构。</div>
+    </details>
+  </section>
+
+  <footer>
+    交互图解 · MiniClaw 回复 UI 渲染层契约 &nbsp;|&nbsp; 单文件零依赖，双击即开 · 对标 WorkBuddy
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var NS="http://www.w3.org/2000/svg";
+  function el(tag,attrs){var e=document.createElementNS(NS,tag);for(var k in attrs)e.setAttribute(k,attrs[k]);return e;}
+  function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
+  function esc(s){return String(s).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c];});}
+  function flash(id){var n=document.getElementById(id);if(n){n.setAttribute("class","flash");setTimeout(function(){n.removeAttribute("class");},600);}}
+
+  /* ===== Mini markdown 渲染器（含代码高亮 / 表格 / 列表） ===== */
+  function highlight(code){
+    var h=esc(code);
+    h=h.replace(/\b(function|const|let|var|return|switch|case|break|import|export|type|interface|class|new|await|async|if|else|for|of|in|from|public|private|void|true|false|null)\b/g,'<span class="kw">$1</span>');
+    h=h.replace(/\b(string|number|boolean|Event|any|void|Promise|Array|object)\b/g,'<span class="ty">$1</span>');
+    return h;
+  }
+  function highlightJSON(o){
+    var s=esc(JSON.stringify(o,null,2));
+    s=s.replace(/"([^"]+)":/g,'<span class="kw">"$1"</span>:');
+    s=s.replace(/: "([^"]*)"/g,': <span class="st">"$1"</span>');
+    s=s.replace(/: (-?\d+\.?\d*)/g,': <span class="nu">$1</span>');
+    return s;
+  }
+  function inline(s){
+    return esc(s)
+      .replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>')
+      .replace(/`([^`]+)`/g,'<code>$1</code>');
+  }
+  function mdToHtml(src){
+    var lines=src.split("\n"), out="", i=0;
+    var fence=/^```/;
+    while(i<lines.length){
+      var line=lines[i];
+      if(fence.test(line)){
+        var buf=[]; i++;
+        while(i<lines.length && !fence.test(lines[i])){ buf.push(lines[i]); i++; }
+        i++;
+        out+="<pre><code>"+highlight(buf.join("\n"))+"</code></pre>";
+        continue;
+      }
+      if(/^\|.*\|\s*$/.test(line) && i+1<lines.length && /^\|[\s:|-]+\|\s*$/.test(lines[i+1])){
+        var head=line.split("|").slice(1,-1).map(function(c){return c.trim();});
+        i+=2; var rows=[];
+        while(i<lines.length && /^\|.*\|\s*$/.test(lines[i])){ rows.push(lines[i].split("|").slice(1,-1).map(function(c){return c.trim();})); i++; }
+        var t='<table class="mdt"><thead><tr>'+head.map(function(h){return "<th>"+inline(h)+"</th>";}).join("")+"</tr></thead><tbody>";
+        rows.forEach(function(r){ t+="<tr>"+r.map(function(c){return "<td>"+inline(c)+"</td>";}).join("")+"</tr>"; });
+        t+="</tbody></table>"; out+=t; continue;
+      }
+      var m;
+      if(m=line.match(/^(#{1,3})\s+(.*)/)){ var lv=m[1].length; out+="<h"+lv+">"+inline(m[2])+"</h"+lv+">"; i++; continue; }
+      if(/^>\s?/.test(line)){ out+="<blockquote>"+inline(line.replace(/^>\s?/,""))+"</blockquote>"; i++; continue; }
+      if(/^\s*[-*]\s+/.test(line)){
+        var items=[];
+        while(i<lines.length && /^\s*[-*]\s+/.test(lines[i])){ items.push("<li>"+inline(lines[i].replace(/^\s*[-*]\s+/,""))+"</li>"); i++; }
+        out+="<ul>"+items.join("")+"</ul>"; continue;
+      }
+      if(line.trim()===""){ i++; continue; }
+      var para=[];
+      while(i<lines.length && lines[i].trim()!=="" && !/^(#{1,3}\s|```|>|[-*]\s|\|.*\|\s*$)/.test(lines[i])){ para.push(inline(lines[i])); i++; }
+      out+="<p>"+para.join("<br>")+"</p>";
+    }
+    return out;
+  }
+
+  /* ===== 图标 ===== */
+  var ICONS={
+    wrench:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2-2 2.5-2.5z"/></svg>',
+    pencil:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>'
+  };
+
+  /* ===== Section 2：事件驱动聊天渲染器 ===== */
+  var STAGES=["thinking","tool","answer"];
+  var STAGE_META={
+    thinking:{label:"思考中", icon:'<span class="spin"></span>'},
+    tool:{label:"调用工具", icon:ICONS.wrench},
+    answer:{label:"撰写回答", icon:ICONS.pencil}
+  };
+  var state={stage:"",reasoning:"",tool:null,answer:""};
+  var playing=false;
+  // 增量渲染状态：已提交字符数 + 当前开口块 + caret 节点
+  var ansState={ len:0, open:null, caret:null };
+  var reasonLen=0;
+
+  function renderTool(t){
+    var done=!!t.content;
+    var status=done
+      ? '<span style="color:var(--ok);margin-left:auto;font-family:var(--mono);font-size:11px">✓ '+(t.elapsed_ms/1000).toFixed(2)+'s</span>'
+      : '<span class="spin" style="margin-left:auto"></span>';
+    return '<div class="th">'+ICONS.wrench+'<b>'+esc(t.name)+'</b>'+status+'</div>'+
+      '<div class="tb"><div class="lbl">arguments</div><pre>'+highlightJSON(t.arguments)+'</pre>'+
+      (done?'<div class="lbl">result</div><pre>'+esc(t.content)+'</pre>':'')+'</div>';
+  }
+  function renderChat(){
+    var sb=document.getElementById("stagebar");
+    sb.innerHTML=STAGES.map(function(v){
+      var cur=STAGES.indexOf(state.stage), idx=STAGES.indexOf(v), cls="";
+      if(state.stage===v) cls="active"; else if(cur>idx) cls="done";
+      return '<div class="chip '+cls+'">'+STAGE_META[v].icon+'<span>'+STAGE_META[v].label+'</span></div>';
+    }).join("");
+    var tb=document.getElementById("toolBox");
+    tb.style.display=state.tool?"block":"none";
+    if(state.tool) tb.innerHTML=renderTool(state.tool);
+    syncReasoning();
+    syncAnswer();
+  }
+
+  // 增量渲染：已渲染内容用「稳定 DOM 节点」保留，只追加「新增的行」，
+  // 杜绝整块 innerHTML 重渲导致的「原地闪回」。这正是正文渲染层契约要的效果。
+  function ansReset(){
+    var ab=document.getElementById("answerBody");
+    if(ab) ab.innerHTML="";
+    ansState.len=0; ansState.open=null; ansState.caret=null;
+  }
+  // 一次性清空：state + 已渲染 DOM + 增量计数器。重播 / 重置都走这里，
+  // 否则旧 DOM 残留 + ansState.len/reasonLen 错位会导致增量索引算错、内容重复。
+  function fullReset(){
+    state={stage:"",reasoning:"",tool:null,answer:""};
+    ansReset();
+    var rbd=document.getElementById("reasonBody");
+    if(rbd) rbd.innerHTML="";
+    reasonLen=0;
+    renderChat();
+  }
+  function syncReasoning(){
+    var rbBox=document.getElementById("reasonBox");
+    var rb=document.getElementById("reasonBody");
+    rbBox.style.display=state.reasoning?"block":"none";
+    if(state.reasoning){
+      var add=state.reasoning.slice(reasonLen);
+      if(add) rb.appendChild(document.createTextNode(add));
+      reasonLen=state.reasoning.length;
+    }
+  }
+  function syncAnswer(){
+    var newText=state.answer.slice(ansState.len);
+    if(newText){ ansAppend(newText); ansState.len=state.answer.length; }
+    if(ansState.caret) ansState.caret.remove();
+    ansState.caret=null;
+    if(playing && state.stage==="answer"){
+      var ab=document.getElementById("answerBody");
+      var c=document.createElement("span"); c.className="caret"; ab.appendChild(c); ansState.caret=c;
+    }
+  }
+  function ansAppend(t){
+    var lines=t.split("\n");
+    while(lines.length && lines[lines.length-1]==="") lines.pop();
+    for(var i=0;i<lines.length;i++) ansLine(lines[i]);
+  }
+  function ansLine(line){
+    var ab=document.getElementById("answerBody");
+    var o=ansState.open;
+    if(line.trim()===""){ ansState.open=null; return; }
+    var fm=line.match(/^```(\w*)\s*$/);
+    if(fm){
+      if(o&&o.type==="code"){ o.code.innerHTML=highlight(o.code.textContent); ansState.open=null; return; }
+      var pre=document.createElement("pre"); var code=document.createElement("code");
+      pre.appendChild(code); ab.appendChild(pre);
+      ansState.open={type:"code", code:code}; return;
+    }
+    if(o&&o.type==="code"){ o.code.appendChild(document.createTextNode(line+"\n")); return; }
+    var hm=line.match(/^(#{1,3})\s+(.*)$/);
+    if(hm){ ansState.open=null; var h=document.createElement("h"+hm[1].length); h.innerHTML=inline(hm[2]); ab.appendChild(h); return; }
+    if(/^>\s?/.test(line)){
+      if(!(o&&o.type==="blockquote")){ var bq=document.createElement("blockquote"); ab.appendChild(bq); ansState.open={type:"blockquote", el:bq, text:""}; o=ansState.open; }
+      o.text+=line.replace(/^>\s?/,"")+"\n"; o.el.innerHTML=inline(o.text); return;
+    }
+    var lm=line.match(/^(\s*)([-*]|\d+\.)\s+(.*)$/);
+    if(lm){
+      var ordered=/\d+\./.test(lm[2]);
+      if(!(o&&o.type===(ordered?"ol":"ul"))){ var ul=document.createElement(ordered?"ol":"ul"); ab.appendChild(ul); ansState.open={type:ordered?"ol":"ul", el:ul}; o=ansState.open; }
+      var li=document.createElement("li"); li.innerHTML=inline(lm[3]); o.el.appendChild(li); return;
+    }
+    if(/^\|.*\|\s*$/.test(line)){
+      if(!(o&&o.type==="table")){ var tbl=document.createElement("table"); tbl.className="mdt"; var thead=document.createElement("thead"); var tbody=document.createElement("tbody"); tbl.appendChild(thead); tbl.appendChild(tbody); ab.appendChild(tbl); ansState.open={type:"table", thead:thead, tbody:tbody, row:0}; o=ansState.open; }
+      var cells=line.replace(/^\||\|$/g,"").split("|").map(function(c){return c.trim();});
+      if(o.row===0){ var tr=document.createElement("tr"); cells.forEach(function(c){var th=document.createElement("th"); th.innerHTML=inline(c); tr.appendChild(th);}); o.thead.appendChild(tr); o.row=1; }
+      else if(/^[\s:|-]+$/.test(line)){ /* 分隔行，跳过 */ }
+      else { var tr2=document.createElement("tr"); cells.forEach(function(c){var td=document.createElement("td"); td.innerHTML=inline(c); tr2.appendChild(td);}); o.tbody.appendChild(tr2); }
+      return;
+    }
+    if(!(o&&o.type==="p")){ var p=document.createElement("p"); ab.appendChild(p); ansState.open={type:"p", el:p, text:""}; o=ansState.open; }
+    o.text+=(o.text?"\n":"")+line; o.el.innerHTML=inline(o.text);
+  }
+  function applyEvent(ev){
+    switch(ev.type){
+      case "stage": state.stage=ev.value; break;
+      case "reasoning": state.reasoning+=ev.content; break;
+      case "tool_call": state.tool={name:ev.name,arguments:ev.arguments,content:null,elapsed_ms:null}; break;
+      case "tool_result": if(state.tool){state.tool.content=ev.content;state.tool.elapsed_ms=ev.elapsed_ms;} break;
+      case "token": state.answer+=ev.content; break;
+    }
+  }
+  function describe(ev){
+    switch(ev.type){
+      case "stage": return "⮞ stage = "+ev.value+" → 顶部指示条切到「"+STAGE_META[ev.value].label+"」";
+      case "reasoning": return "⮞ reasoning 增量 → 思考块 append 文本";
+      case "tool_call": return "⮞ tool_call: "+ev.name+" → 插入工具卡片（参数 JSON）";
+      case "tool_result": return "⮞ tool_result 回填 → 卡片 spinner 翻转成 ✓ 耗时";
+      case "token": return "⮞ token 增量 → 流式 Markdown 渲染（+ 打字光标）";
+    }
+    return "";
+  }
+  // 模拟一次完整回复的事件流
+  var SCRIPT=[
+    {type:"stage",value:"thinking"},
+    {type:"reasoning",content:"用户问的是「回复界面那种效果怎么实现」。\n"},
+    {type:"reasoning",content:"需要先讲清渲染层契约，再给一个可交互演示。\n"},
+    {type:"reasoning",content:"重点：结构化事件流 + 组件化渲染，而非堆动画。\n"},
+    {type:"stage",value:"tool"},
+    {type:"tool_call",name:"web_search",arguments:{query:"streaming markdown chat ui render",top_k:5}},
+    {type:"tool_result",content:"Found 3 articles: streaming UI, SSE events, code highlight…",elapsed_ms:1240},
+    {type:"stage",value:"answer"},
+    {type:"token",content:"# 渲染层契约\n\n"},
+    {type:"token",content:"WorkBuddy 的回复效果由两层构成：\n\n"},
+    {type:"token",content:"1. **后端**吐结构化事件流（不只是 token）\n"},
+    {type:"token",content:"2. **前端**按事件类型渲染对应组件\n\n"},
+    {type:"token",content:"```ts\n"},
+    {type:"token",content:"function render(ev: Event) {\n"},
+    {type:"token",content:"  switch (ev.type) {\n"},
+    {type:"token",content:'    case "token":     appendMarkdown(ev.content);\n'},
+    {type:"token",content:'    case "reasoning": showReasoning(ev.content);\n'},
+    {type:"token",content:'    case "tool_call": showToolCard(ev);\n'},
+    {type:"token",content:"  }\n"},
+    {type:"token",content:"}\n```\n\n"},
+    {type:"token",content:"> 前端是**事件驱动**的渲染器，每次只更新增量区块，而非重渲整页。\n\n"},
+    {type:"token",content:"| 事件 | 前端组件 |\n"},
+    {type:"token",content:"| --- | --- |\n"},
+    {type:"token",content:"| token / reasoning | 流式 Markdown / 思考块 |\n"},
+    {type:"token",content:"| tool_call + tool_result | 工具卡片 |\n"},
+    {type:"token",content:"| artifact | 预览面板 |\n"}
+  ];
+  async function playReply(){
+    if(playing) return;
+    playing=true;
+    fullReset();
+    var step=document.getElementById("s2step");
+    for(var i=0;i<SCRIPT.length;i++){
+      await sleep(430);
+      applyEvent(SCRIPT[i]);
+      renderChat();
+      step.textContent=describe(SCRIPT[i]);
+    }
+    playing=false;
+    renderChat();
+    step.textContent="✅ 一次完整回复渲染完成 —— 前端是「事件驱动」的渲染器，每个事件只追加增量区块";
+  }
+  document.getElementById("s2play").onclick=playReply;
+  document.getElementById("s2reset").onclick=function(){
+    playing=false; fullReset();
+    document.getElementById("s2step").textContent='点「播放一次完整回复」，看事件如何驱动前端渲染 ↑';
+  };
+  renderChat();
+
+  /* ===== Section 1：管线播放 ===== */
+  async function playPipe(){
+    var step=document.getElementById("s1step");
+    ["rLLM","rGate","rFront"].forEach(function(id){document.getElementById(id).setAttribute("stroke","#2b3440");});
+    step.textContent="① LLM 产生原始流：token 与 reasoning_content 混在一起";
+    flash("rLLM"); document.getElementById("rLLM").setAttribute("stroke","#4c9aff");
+    await sleep(900);
+    step.textContent="② Gateway 解析：把原始流切成结构化事件（token / reasoning / tool_* / artifact / stage）";
+    document.getElementById("rLLM").setAttribute("stroke","#2b3440");
+    flash("rGate"); document.getElementById("rGate").setAttribute("stroke","#7c5cff");
+    await sleep(1000);
+    step.textContent="③ Frontend 订阅事件，按类型渲染组件（Markdown / 思考块 / 工具卡 / Artifact）";
+    document.getElementById("rGate").setAttribute("stroke","#2b3440");
+    flash("rFront"); document.getElementById("rFront").setAttribute("stroke","#3fb950");
+    await sleep(900);
+    step.textContent="✅ 这就是「渲染层契约」：前后端不再耦合于具体 UI，只约定事件形状";
+  }
+  document.getElementById("s1play").onclick=playPipe;
+  document.getElementById("s1reset").onclick=function(){
+    ["rLLM","rGate","rFront"].forEach(function(id){document.getElementById(id).setAttribute("stroke","#2b3440");});
+    document.getElementById("s1step").textContent='点「播放数据流动」，看 LLM → Gateway → Frontend 的链路 ↑';
+  };
+
+  /* ===== Section 4：状态机播放 ===== */
+  function setStageCircle(s){
+    ["cThink","cTool","cAns"].forEach(function(id){
+      var n=document.getElementById(id);
+      n.setAttribute("stroke","#2b3440"); n.setAttribute("fill","#0d1117");
+      n.nextElementSibling.setAttribute("fill","#9aa7b4");
+    });
+    var map={thinking:"cThink",tool:"cTool",answer:"cAns"};
+    var n=document.getElementById(map[s]);
+    var col={thinking:"#4c9aff",tool:"#7c5cff",answer:"#3fb950"}[s];
+    n.setAttribute("stroke",col); n.nextElementSibling.setAttribute("fill","#e6edf3");
+    flash(map[s]);
+  }
+  async function playSM(){
+    var step=document.getElementById("s4step");
+    setStageCircle("thinking");
+    step.textContent="收到请求 → stage=thinking：前端显示「思考中」chips（spinner）";
+    await sleep(950);
+    setStageCircle("tool");
+    step.textContent="检测到 tool_call → stage=tool：插入工具卡片并实时更新参数/结果";
+    await sleep(950);
+    setStageCircle("answer");
+    step.textContent="收到首批 token → stage=answer：开始流式 Markdown 渲染";
+  }
+  document.getElementById("s4play").onclick=playSM;
+  document.getElementById("s4reset").onclick=function(){
+    setStageCircle("thinking");
+    document.getElementById("s4step").textContent='点「播放状态流转」，看 stage 事件如何驱动指示条 ↑';
+  };
+  setStageCircle("thinking");
+
+  // 平滑滚动
+  document.querySelectorAll('nav.toc a').forEach(function(a){
+    a.addEventListener('click',function(e){e.preventDefault();
+      document.querySelector(a.getAttribute('href')).scrollIntoView({behavior:'smooth',block:'start'});});
+  });
+})();
+</script>
+</body>
+</html>
