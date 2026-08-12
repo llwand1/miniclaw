@@ -307,6 +307,9 @@ function migrate(database: Database.Database): void {
   // importance=记忆重要性权重（A 长期画像默认高、B 近期默认中），source=来源 session/摘要，用于溯源
   try { db.exec('ALTER TABLE memories ADD COLUMN importance REAL NOT NULL DEFAULT 0.5'); } catch { /* 列已存在 */ }
   try { db.exec('ALTER TABLE memories ADD COLUMN source TEXT'); } catch { /* 列已存在 */ }
+  // 记忆隔离迁移：加 session_id 列，把记忆按会话归属，根治「多对话 prompt 互相干扰」。
+  // 旧库（无 session_id 的遗留记忆）置 NULL，召回时作为跨会话兜底仍可注入，避免一次性丢失历史记忆。
+  try { db.exec('ALTER TABLE memories ADD COLUMN session_id TEXT'); } catch { /* 列已存在 */ }
 
   // 记忆表重建迁移：把 category 的 CHECK 约束从 ('A','B') 升级为 ('A','B','C')。
   // SQLite 不支持修改 CHECK，只能重建表；用 sqlite_master 里的建表语句判断是否需要重建（幂等）。
