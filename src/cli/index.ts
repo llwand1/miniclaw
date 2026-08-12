@@ -1,9 +1,10 @@
-import { app, BrowserWindow, Tray, Menu, globalShortcut, nativeImage } from 'electron';
+import { app, BrowserWindow, Tray, Menu, globalShortcut, nativeImage, WebContentsView } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { Gateway } from '../core/gateway';
 import { createServer } from '../office-server';
 import { createLogger } from '../core/logger';
+import { previewService } from '../core/preview';
 
 const cliLog = createLogger('cli');
 
@@ -12,6 +13,12 @@ let floatingWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 
 const gateway = new Gateway();
+
+// 预览子系统订阅：AI 产出的 artifact 进入主进程内存索引，供原生视图按需渲染。
+// 与渲染进程通过 SSE 收到的同一事件解耦，互不依赖。
+gateway.on('artifact', (e: any) => {
+  if (e && e.artifact) previewService.upsertArtifact(e.artifact);
+});
 
 const PORT = parseInt(process.env.PORT || '18791', 10);
 const SERVER_URL = `http://127.0.0.1:${PORT}`;
@@ -45,8 +52,18 @@ function createMainWindow(): void {
     },
   });
 
+  // 实时预览：把预览服务绑定到主窗口
+  const previewDir = path.join(app.getPath('userData'), 'preview');
+  fs.mkdirSync(previewDir, { recursive: true });
+  previewService.init({ WebContentsView, previewDir });
+  previewService.setWindow(mainWindow);
+
   mainWindow.loadURL(SERVER_URL);
-  mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.on('closed', () => {
+    previewService.hideAll();
+    previewService.setWindow(null);
+    mainWindow = null;
+  });
 }
 
 function createFloatingWindow(): void {

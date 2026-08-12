@@ -1,0 +1,148 @@
+/* ─── MiniClaw 全局样式 + 主题系统 ─── */
+
+/* ═══ 重置 ═══ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+button { font-family: inherit; }
+button, [role="button"] { user-select: none; }
+
+/* ═══ 亮色主题（默认） ═══ */
+:root, [data-theme="light"] {
+  --bg:          #f8f9fb;
+  --bg-surface:  #ffffff;
+  --bg-muted:    #f3f4f6;
+  --bg-inset:    #f9fafb;
+  --border:      #e5e7eb;
+  --border-light:#f3f4f6;
+  --text:        #111827;
+  --text-2:      #374151;
+  --text-3:      #6b7280;
+  --text-4:      #9ca3af;
+  --text-5:      #d1d5db;
+
+  --accent:      #6366f1;
+  --accent-soft: #ede9fe;
+  --accent-text: #ffffff;
+  --accent-hover:#5558e6;
+
+  --success:     #10b981;
+  --success-bg:  #f0fdf4;
+  --success-bdr: #bbf7d0;
+  --danger:      #ef4444;
+  --danger-bg:   #fef2f2;
+  --danger-bdr:  #fecaca;
+  --warning:     #f59e0b;
+  --warning-bg:  #fffbeb;
+
+  --shadow-sm:   0 1px 2px rgba(0,0,0,0.04);
+  --shadow:      0 1px 3px rgba(0,0,0,0.06);
+  --shadow-md:   0 4px 12px rgba(0,0,0,0.08);
+  --shadow-lg:   0 8px 24px rgba(0,0,0,0.10);
+
+  --scrollbar:   #d1d5db;
+  --scrollbar-h: #9ca3af;
+
+  color-scheme: light;
+}
+
+/* ═══ 暗色主题 ═══ */
+[data-theme="dark"] {
+  --bg:          #0f1117;
+  --bg-surface:  #1a1d27;
+  --bg-muted:    #232733;
+  --bg-inset:    #14161f;
+  --border:      #2d3140;
+  --border-light:#232733;
+  --text:        #f0f1f5;
+  --text-2:      #d1d5db;
+  --text-3:      #9ca3af;
+  --text-4:      #6b7280;
+  --text-5:      #4b5563;
+
+  --accent:      #818cf8;
+  --accent-soft: #1e1b4b;
+  --accent-text: #ffffff;
+  --accent-hover:#6366f1;
+
+  --success:     #34d399;
+  --success-bg:  #052e16;
+  --success-bdr: #166534;
+  --danger:      #f87171;
+  --danger-bg:   #450a0a;
+  --danger-bdr:  #7f1d1d;
+  --warning:     #fbbf24;
+  --warning-bg:  #451a03;
+
+  --shadow-sm:   0 1px 2px rgba(0,0,0,0.2);
+  --shadow:      0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md:   0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg:   0 8px 24px rgba(0,0,0,0.5);
+
+  --scrollbar:   #374151;
+  --scrollbar-h: #4b5563;
+
+  color-scheme: dark;
+}
+
+/* ═══ body 背景同步 ═══ */
+body {
+  background: var(--bg);
+  color: var(--text);
+  transition: background 0.25s ease, color 0.25s ease;
+}
+
+/* ═══ 输入框 focus ═══ */
+input:focus, textarea:focus, select:focus, button:focus-visible {
+  outline: none;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent) !important;
+}
+
+/* ═══ 选中文本 ═══ */
+::selection {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  color: inherit;
+}
+
+/* ═══ 滚动条 ═══ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-h); }
+
+/* ═══ 动画 ═══ */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ═══ 整页切换过渡（App 切 Tab：对话/预览/设置） ═══ */
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.page-enter {
+  height: 100%;
+  animation: pageEnter .26s cubic-bezier(.2, .7, .3, 1) both;
+}
+
+/* ═══ 主题切换按钮：图标切换时的弹入旋转 ═══ */
+@keyframes themePop {
+  0%   { transform: rotate(-30deg) scale(.6); opacity: .15; }
+  60%  { transform: rotate(10deg) scale(1.12); }
+  100% { transform: none; opacity: 1; }
+}
+.theme-pop { display: inline-flex; animation: themePop .45s cubic-bezier(.2, .8, .2, 1); }
+
+/* ═══ QuizCard 流式光标闪烁（主窗 + 悬浮窗共用，全局定义避免 mcCaret 未定义） ═══ */
+@keyframes qcCaret {
+  50% { opacity: 0; }
+}
