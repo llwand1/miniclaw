@@ -75,6 +75,14 @@
 | 自动沉淀 | `summarizeMemories(provider, history)` | 回复后异步提取 `[MEMO:内容\|A/B/C]` |
 | 记忆解析 | `extractMemos(text)` | 解析回复中的 `[MEMO:...]` 行 |
 
+### 后端启动种子（src/core/gateway/index.ts）
+
+> P0-1（2026-08-12 修复）：空库自动注入默认 provider + agent，开箱不再 500。
+
+| 功能 | 符号 | 说明 |
+|------|------|------|
+| 空库种子 | `seedIfEmpty`（private，`start()` 调用） | providers/agents 表为空时注入 `openai-default` provider（api_key 留空，用户设置页填写）+ `agents.id='default'`；幂等，仅空表注入 |
+
 ### 后端数据库（src/core/gateway/db.ts）
 
 | 功能 | 表/函数 |

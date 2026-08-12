@@ -510,11 +510,20 @@ db.transaction(() => {
    * - category A = 长期个性化画像（身份/偏好/习惯），默认高 importance
    * - category B = 近期关注，默认中 importance
    */
-  private retrieveMemories(query?: string): {
+  private retrieveMemories(query?: string, sessionId?: string): {
     id: number; content: string; category: string; importance: number;
     created_at: string; relevance: number; score: number;
   }[] {
-    const all = getDb().prepare('SELECT id, content, category, importance, created_at FROM memories').all() as any[];
+    const db = getDb();
+    // 会话隔离：传入 sessionId 时，A 类（长期画像）全局保留（跨会话个性化），
+    // B/C 类（近期关注/任务经验）仅取本会话或历史遗留(NULL)的记忆，避免不同对话互相串台。
+    let sql = 'SELECT id, content, category, importance, created_at FROM memories';
+    const params: any[] = [];
+    if (sessionId) {
+      sql += ' WHERE (category = ? OR session_id = ? OR session_id IS NULL)';
+      params.push('A', sessionId);
+    }
+    const all = db.prepare(sql).all(...params) as any[];
     const qTok = this.tokenize(query || '');
     const now = Date.now();
     return all.map((m: any) => {
@@ -588,9 +597,9 @@ db.transaction(() => {
    * 返回 [{ name, items }]，调用方拼进 system prompt；召回逻辑复用 retrieveMemories 的
    * 相关性×重要性×时间衰减 打分，仅按 category 过滤对应模式。
    */
-  private loadModeMemories(modeKeys: string[], query?: string): { name: string; items: string[] }[] {
+  private loadModeMemories(modeKeys: string[], query?: string, sessionId?: string): { name: string; items: string[] }[] {
     const blocks: { name: string; items: string[] }[] = [];
-    const ranked = this.retrieveMemories(query);
+    const ranked = this.retrieveMemories(query, sessionId);
     for (const key of modeKeys) {
       const mode = MEMORY_MODES.find(mm => mm.key === key);
       if (!mode || !mode.category) continue;
@@ -659,7 +668,7 @@ db.transaction(() => {
     return blocks.join('\n\n');
   }
 
-  buildSystemPrompt(query?: string): string {
+  buildSystemPrompt(query?: string, sessionId?: string): string {
     const searchEnabled = this.getSearchConfig().enabled;
     const parts: string[] = [];
 
@@ -920,12 +929,12 @@ db.transaction(() => {
     const existing = db.prepare('SELECT id, category, importance FROM memories WHERE content = ?').get(content) as any;
     if (existing) {
       if (existing.category !== category) {
-        db.prepare('UPDATE memories SET category = ?, created_at = datetime("now"), importance = ?, source = COALESCE(source, ?) WHERE id = ?')
-          .run(category, importance, source || null, existing.id);
+        db.prepare('UPDATE memories SET category = ?, created_at = datetime("now"), importance = ?, source = COALESCE(source, ?), session_id = COALESCE(session_id, ?) WHERE id = ?')
+          .run(category, importance, source || null, source || null, existing.id);
       } else {
-        // 刷新时间；仅在更高时提升 importance（避免被低权重覆盖）；补记来源
-        db.prepare('UPDATE memories SET created_at = datetime("now"), importance = MAX(importance, ?), source = COALESCE(source, ?) WHERE id = ?')
-          .run(importance, source || null, existing.id);
+        // 刷新时间；仅在更高时提升 importance（避免被低权重覆盖）；补记来源与归属会话
+        db.prepare('UPDATE memories SET created_at = datetime("now"), importance = MAX(importance, ?), source = COALESCE(source, ?), session_id = COALESCE(session_id, ?) WHERE id = ?')
+          .run(importance, source || null, source || null, existing.id);
       }
       return;
     }
@@ -935,8 +944,8 @@ db.transaction(() => {
       // 限流：优先删除「重要性最低且最旧」的一条（替代原纯 FIFO，更贴近衰减语义）
       db.prepare('DELETE FROM memories WHERE id IN (SELECT id FROM memories WHERE category = ? ORDER BY importance ASC, created_at ASC LIMIT 1)').run(category);
     }
-    db.prepare('INSERT INTO memories (content, category, importance, source) VALUES (?, ?, ?, ?)')
-      .run(content, category, importance, source || null);
+    db.prepare('INSERT INTO memories (content, category, importance, source, session_id) VALUES (?, ?, ?, ?, ?)')
+      .run(content, category, importance, source || null, source || null);
   }
 
   /**
@@ -966,7 +975,28 @@ db.transaction(() => {
     }
   }
 
+  /** 同一会话的串行队列：sessionId -> 正在/即将执行的 Promise。保证「读历史→生成→写回」原子。 */
+  private sessionLocks = new Map<string, Promise<unknown>>();
+
+  /**
+   * 对外入口：同一会话串行化。
+   * 把「读历史 → 生成 → 写回」整段流程按 sessionId 串成队列，保证任意时刻每个会话
+   * 只有一个请求在进行，杜绝快速连发/重连导致的多轮流式互相穿插、AbortController 互相覆盖。
+   */
   async handleMessage(inbound: InboundMessage): Promise<string> {
+    const sessionId = inbound.sessionId || uuidv4();
+    inbound.sessionId = sessionId; // 固定，确保队列内后续读取一致
+    const prev = this.sessionLocks.get(sessionId) ?? Promise.resolve();
+    const run = prev.then(() => this.handleMessageImpl(inbound));
+    const stored = run.catch(() => {}); // 吞掉异常，避免单次失败卡死后续消息
+    this.sessionLocks.set(sessionId, stored);
+    run.finally(() => {
+      if (this.sessionLocks.get(sessionId) === stored) this.sessionLocks.delete(sessionId);
+    });
+    return run;
+  }
+
+  private async handleMessageImpl(inbound: InboundMessage): Promise<string> {
     // 优先用前端指定的 provider/model；否则回退到「已选模型」；最后回退默认服务商
     let provider: ProviderConfig | null = null;
     let chosenModel: string | null = null;
@@ -1007,7 +1037,7 @@ db.transaction(() => {
     // 单独构造 convHistory，避免污染用于记忆抽取/摘要的 history。
     const attachmentCtx = this.buildAttachmentContext(inbound.attachments);
     const convHistory: ChatMessage[] = attachmentCtx ? [{ role: 'system', content: attachmentCtx }, ...history] : history;
-    const systemPrompt = this.buildSystemPrompt(inbound.text);
+    const systemPrompt = this.buildSystemPrompt(inbound.text, sessionId);
     const agent: AgentConfig = { id: 'default', name: '助手', role: 'assistant', providerId: provider.id, model, systemPrompt, enabled: true };
 
     const searchConfig = this.getSearchConfig();
@@ -1122,7 +1152,7 @@ db.transaction(() => {
           const memKeys = memTriggers.length > 0
             ? (memTriggers.includes('none') ? [] : memTriggers)
             : this.resolveMemoryModes({ complex: true });
-          const memBlocks = this.loadModeMemories(memKeys, inbound.text);
+          const memBlocks = this.loadModeMemories(memKeys, inbound.text, sessionId);
           const sysParts: string[] = [];
           if (memBlocks.length > 0) {
             const memLines: string[] = ['以下是根据你选择的记忆模式加载的记忆，请结合这些记忆回答用户问题：', ''];
@@ -1278,10 +1308,13 @@ db.transaction(() => {
     if (!ctx) return sessionId;
     this.pendingClarify.delete(sessionId);
     const db = getDb();
-    // 用户选择以 system 消息入库（模型 history 可见，但前端不渲染成用户气泡，
-    // 保证「澄清卡片 → 选择 → AI 继续」在同一轮对话流内自然衔接，不割裂成新的一轮）。
+    // 用户选择作为 user 消息入库（角色序列正确，前端正常渲染成用户气泡）；
+    // 另写一条 system 消息框定「这是上一步澄清的选择」，供模型理解上下文，
+    // 避免把选择当成孤立 system 注入导致重放历史时角色错乱。
     db.prepare("INSERT INTO messages (session_id,role,content) VALUES (?,?,?)")
-      .run(sessionId, 'system', `【需求确认】${ctx.clarify.question}\n用户选择：${answer}`);
+      .run(sessionId, 'system', `【需求确认】${ctx.clarify.question}\n（用户已在下方以用户消息给出选择，请据此继续）`);
+    db.prepare("INSERT INTO messages (session_id,role,content) VALUES (?,?,?)")
+      .run(sessionId, 'user', answer);
     return this.handleMessage({
       source: ctx.source,
       sessionId,
