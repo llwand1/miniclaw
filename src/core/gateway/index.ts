@@ -259,8 +259,28 @@ export class Gateway extends EventEmitter {
   async start(): Promise<void> {
     // 首次启动自动创建默认工作区，省去手动配置（用户仍可在 UI 改到自己的项目目录）
     ensureDefaultWorkspace();
+    // P0-1：空库种子——providers/agents 为空表时注入默认服务商 + 默认 Agent，
+    // 全新机器开箱即可发起对话（配置 API Key 后真正可用），不再抛「No default agent」500。
+    this.seedIfEmpty();
     log.info('Gateway started');
     this.startScheduler();
+  }
+
+  /** 空库种子：仅当表为空时注入，幂等。api_key 留空由用户在设置页填写（加密由 migrateSecrets 兜底）。 */
+  private seedIfEmpty(): void {
+    const db = getDb();
+    const provCount = (db.prepare('SELECT COUNT(*) AS c FROM providers').get() as any).c as number;
+    if (provCount === 0) {
+      db.prepare('INSERT INTO providers (id,type,name,base_url,api_key,default_model,enabled) VALUES (?,?,?,?,?,?,?)')
+        .run('openai-default', 'openai', 'OpenAI', 'https://api.openai.com/v1', '', 'gpt-4o-mini', 1);
+      log.info('Seeded default provider (openai-default)');
+    }
+    const agentCount = (db.prepare('SELECT COUNT(*) AS c FROM agents').get() as any).c as number;
+    if (agentCount === 0) {
+      db.prepare('INSERT INTO agents (id,name,role,provider_id,model,system_prompt,enabled) VALUES (?,?,?,?,?,?,?)')
+        .run('default', '默认助手', 'assistant', 'openai-default', 'gpt-4o-mini', DEFAULT_SYSTEM_PROMPT, 1);
+      log.info('Seeded default agent (default)');
+    }
   }
 
   getDefaultProvider(): ProviderConfig | null {
