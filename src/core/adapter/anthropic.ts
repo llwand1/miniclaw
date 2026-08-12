@@ -1,4 +1,4 @@
-import { LLMAdapter, ChatRequest, TokenChunk } from './types';
+import { LLMAdapter, ChatRequest, TokenChunk, ModelListRequest } from './types';
 import { createLogger } from '../logger';
 const log = createLogger('adapter:anthropic');
 
@@ -12,72 +12,80 @@ export class AnthropicAdapter implements LLMAdapter {
     const systemMsg = req.messages.find(m => m.role === 'system');
     const nonSystemMsgs = req.messages.filter(m => m.role !== 'system');
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': req.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: req.model,
-        messages: nonSystemMsgs.map(m => ({ role: m.role, content: m.content })),
-        system: systemMsg?.content,
-        temperature: req.temperature ?? 0.7,
-        stream: true,
-      }),
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 90_000);
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Anthropic API error ${response.status}: ${errText}`);
-    }
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': req.apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: req.model,
+          messages: nonSystemMsgs.map(m => ({ role: m.role, content: m.content })),
+          system: systemMsg?.content,
+          temperature: req.temperature ?? 0.7,
+          stream: true,
+        }),
+        signal: controller.signal,
+      });
 
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('No response body');
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Anthropic API error ${response.status}: ${errText}`);
+      }
 
-    const decoder = new TextDecoder();
-    let buffer = '';
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const data = trimmed.slice(6);
-        if (data === '[DONE]') {
-          yield { content: '', done: true };
-          return;
-        }
-        try {
-          const parsed = JSON.parse(data);
-          if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-            yield { content: parsed.delta.text, done: false };
-          }
-          if (parsed.type === 'message_delta' && parsed.delta?.stop_reason) {
-            yield {
-              content: '',
-              done: true,
-              finishReason: parsed.delta.stop_reason,
-            };
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const data = trimmed.slice(6);
+          if (data === '[DONE]') {
+            yield { content: '', done: true };
             return;
           }
-        } catch {
-          log.warn({ data }, 'Failed to parse SSE chunk');
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+              yield { content: parsed.delta.text, done: false };
+            }
+            if (parsed.type === 'message_delta' && parsed.delta?.stop_reason) {
+              yield {
+                content: '',
+                done: true,
+                finishReason: parsed.delta.stop_reason,
+              };
+              return;
+            }
+          } catch {
+            log.warn({ data }, 'Failed to parse SSE chunk');
+          }
         }
       }
-    }
 
-    yield { content: '', done: true };
+      yield { content: '', done: true };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
-  async listModels(): Promise<string[]> {
+  async listModels(_config?: ModelListRequest): Promise<string[]> {
     return ['claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307'];
   }
 }

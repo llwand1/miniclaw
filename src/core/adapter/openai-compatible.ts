@@ -1,4 +1,4 @@
-import { LLMAdapter, ChatRequest, TokenChunk } from './types';
+import { LLMAdapter, ChatRequest, TokenChunk, ModelListRequest } from './types';
 import { createLogger } from '../logger';
 const log = createLogger('adapter:openai');
 
@@ -9,79 +9,101 @@ export class OpenAICompatibleAdapter implements LLMAdapter {
     const baseUrl = req.baseUrl || 'https://api.openai.com/v1';
     const url = `${baseUrl}/chat/completions`;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${req.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: req.model,
-        messages: req.messages,
-        temperature: req.temperature ?? 0.7,
-        stream: true,
-      }),
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 90_000);
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`OpenAI API error ${response.status}: ${errText}`);
-    }
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${req.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: req.model,
+          messages: req.messages,
+          temperature: req.temperature ?? 0.7,
+          stream: true,
+          // 要求流式返回 usage（OpenAI 兼容服务商默认不返回，需显式开启），
+          // 这样 Trace 瀑布的 LLM span 才能展示真实 prompt/completion tokens。
+          stream_options: { include_usage: true },
+        }),
+        signal: controller.signal,
+      });
 
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('No response body');
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`OpenAI API error ${response.status}: ${errText}`);
+      }
 
-    const decoder = new TextDecoder();
-    let buffer = '';
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const data = trimmed.slice(6);
-        if (data === '[DONE]') {
-          yield { content: '', done: true };
-          return;
-        }
-        try {
-          const parsed = JSON.parse(data);
-          const delta = parsed.choices?.[0]?.delta?.content || '';
-          const finishReason = parsed.choices?.[0]?.finish_reason || undefined;
-          const usage = parsed.usage
-            ? {
-                promptTokens: parsed.usage.prompt_tokens || 0,
-                completionTokens: parsed.usage.completion_tokens || 0,
-              }
-            : undefined;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-          yield {
-            content: delta,
-            done: !!finishReason,
-            finishReason,
-            usage,
-          };
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const data = trimmed.slice(6);
+          if (data === '[DONE]') {
+            yield { content: '', done: true };
+            return;
+          }
+          try {
+            const parsed = JSON.parse(data);
+            const choice = parsed.choices?.[0];
+            const deltaObj = choice?.delta || {};
+            const delta = deltaObj.content || '';
+            // 兼容多种推理字段名：DeepSeek-R1(reasoning_content)、部分网关(reasoning)、
+            // Claude thinking 经 OpenAI 兼容层(thinking)、以及 reasoning_details.content 等。
+            const reasoning =
+              deltaObj.reasoning_content ||
+              deltaObj.reasoning ||
+              deltaObj.thinking ||
+              (deltaObj.reasoning_details && deltaObj.reasoning_details.content) ||
+              '';
+            const finishReason = choice?.finish_reason || undefined;
+            const usage = parsed.usage
+              ? {
+                  promptTokens: parsed.usage.prompt_tokens || 0,
+                  completionTokens: parsed.usage.completion_tokens || 0,
+                }
+              : undefined;
 
-          if (finishReason) return;
-        } catch {
-          log.warn({ data }, 'Failed to parse SSE chunk');
+            yield {
+              content: delta,
+              done: !!finishReason,
+              finishReason,
+              reasoning,
+              usage,
+            };
+
+            if (finishReason) return;
+          } catch {
+            log.warn({ data }, 'Failed to parse SSE chunk');
+          }
         }
       }
-    }
 
-    yield { content: '', done: true };
+      yield { content: '', done: true };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
-  async listModels(): Promise<string[]> {
+  async listModels(config?: ModelListRequest): Promise<string[]> {
     try {
-      const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
-      const apiKey = process.env.OPENAI_API_KEY || '';
+      const baseUrl = config?.baseUrl || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+      const apiKey = config?.apiKey || process.env.OPENAI_API_KEY || '';
       const response = await fetch(`${baseUrl}/models`, {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
