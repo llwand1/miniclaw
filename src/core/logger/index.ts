@@ -3,7 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 
 const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
-const DATA_DIR = process.env.DATA_DIR || path.join(process.env.APPDATA || '', 'MiniClaw');
+const DATA_DIR = process.env.DATA_DIR || path.join(process.env.APPDATA || '', 'studentbuddy');
 
 let loggerInstance: pino.Logger;
 
@@ -15,7 +15,7 @@ export function getLogger(): pino.Logger {
     fs.mkdirSync(logDir, { recursive: true });
   }
 
-  const logFile = path.join(logDir, `miniclaw-${new Date().toISOString().slice(0, 10)}.log`);
+  const logFile = path.join(logDir, `studentbuddy-${new Date().toISOString().slice(0, 10)}.log`);
 
   const transport = pino.transport({
     targets: [
@@ -33,7 +33,7 @@ export function getLogger(): pino.Logger {
   });
 
   loggerInstance = pino(
-    { level: LOG_LEVEL, name: 'miniclaw' },
+    { level: LOG_LEVEL, name: 'studentbuddy' },
     transport,
   );
 

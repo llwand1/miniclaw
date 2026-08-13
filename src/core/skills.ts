@@ -1,5 +1,5 @@
 /**
- * MiniClaw Skills 模块
+ * studentbuddy Skills 模块
  * ----------------------------------------------------------------------------
  * 设计契约（与 WorkBuddy 互通的核心）：
  *  - 技能正文存于 SKILL.md 文件，数据库 `skills` 表只做「索引/注册表」
@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './gateway/db';
 
-/** MiniClaw 本地技能根目录（与 DB 同盘同根，零额外配置） */
+/** studentbuddy 本地技能根目录（与 DB 同盘同根，零额外配置） */
 export const SKILLS_DIR = path.join(DATA_DIR, 'skills');
 
 /** WorkBuddy 技能根目录（本机已装 26 个 Google Agent Skills） */
@@ -68,7 +68,7 @@ function ensureDir(dir: string): void {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-/** 把技能写到 MiniClaw 本地目录，返回 SKILL.md 绝对路径 */
+/** 把技能写到 studentbuddy 本地目录，返回 SKILL.md 绝对路径 */
 export function writeLocalSkillFile(name: string, description: string, content: string): string {
   const safe = sanitize(name);
   const dir = path.join(SKILLS_DIR, safe);
@@ -131,7 +131,7 @@ export function listWorkbuddySkills(): { name: string; description: string; path
   return out;
 }
 
-/** 把 MiniClaw 技能导出到 WorkBuddy 技能目录（互通：写回 SKILL.md） */
+/** 把 studentbuddy 技能导出到 WorkBuddy 技能目录（互通：写回 SKILL.md） */
 export function exportSkillToWorkbuddy(name: string, description: string, content: string): string {
   const safe = sanitize(name);
   const dir = path.join(WORKBUDDY_SKILLS_DIR, safe);

@@ -8,8 +8,8 @@ import { ensurePolicy } from '../security/policy';
 
 const dbLog = createLogger('db');
 
-export const DATA_DIR = process.env.DATA_DIR || path.join(process.env.APPDATA || '', 'MiniClaw');
-const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'miniclaw.db');
+export const DATA_DIR = process.env.DATA_DIR || path.join(process.env.APPDATA || '', 'studentbuddy');
+const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'studentbuddy.db');
 
 let db: Database.Database;
 
@@ -252,6 +252,17 @@ function migrate(database: Database.Database): void {
     );
   `);
 
+  // 题库：AI 生成 / 手动导入的选择题组。data 存完整 QuizData JSON（title + questions）。
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS quiz_bank (
+      id TEXT PRIMARY KEY,
+      title TEXT DEFAULT '',
+      data TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'ai',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   // 会话置顶 / 软删除：对已有库非破坏性地补列（幂等）
   const sessionCols = (database.prepare('PRAGMA table_info(sessions)').all() as any[]).map((c) => c.name);
   if (!sessionCols.includes('pinned')) {
@@ -391,6 +402,7 @@ function migrateSecrets(database: Database.Database): void {
 export function closeDb(): void {
   if (db) {
     db.close();
+    db = null as any; // 重置单例,允许 closeDb 后重新 getDb(测试模拟重启/热重载)
     dbLog.info('Database connection closed');
   }
 }

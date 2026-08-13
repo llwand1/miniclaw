@@ -76,7 +76,7 @@ export function useMessageActions() {
   const share = useCallback(async (text: string, title?: string): Promise<ShareResult> => {
     try {
       if (navigator.share) {
-        await navigator.share({ title: title || 'MiniClaw 回复', text });
+        await navigator.share({ title: title || 'studentbuddy 回复', text });
         setShareState('shared');
         return 'shared';
       }

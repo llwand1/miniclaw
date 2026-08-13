@@ -1,4 +1,4 @@
-import { LLMAdapter, ChatRequest, TokenChunk, ModelListRequest } from './types';
+import { LLMAdapter, ChatRequest, TokenChunk, ToolCall, ModelListRequest } from './types';
 import { createLogger } from '../logger';
 const log = createLogger('adapter:openai');
 
@@ -23,21 +23,28 @@ export class OpenAICompatibleAdapter implements LLMAdapter {
     }
 
     try {
+      const body: Record<string, unknown> = {
+        model: req.model,
+        messages: req.messages,
+        temperature: req.temperature ?? 0.7,
+        stream: true,
+        // 要求流式返回 usage（OpenAI 兼容服务商默认不返回，需显式开启），
+        // 这样 Trace 瀑布的 LLM span 才能展示真实 prompt/completion tokens。
+        stream_options: { include_usage: true },
+      };
+      // 原生 function calling:仅当调用方传入 tools 时带上(未传则走纯文本标记路径)
+      if (req.tools && req.tools.length > 0) {
+        body.tools = req.tools;
+        body.tool_choice = 'auto';
+      }
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${req.apiKey}`,
         },
-        body: JSON.stringify({
-          model: req.model,
-          messages: req.messages,
-          temperature: req.temperature ?? 0.7,
-          stream: true,
-          // 要求流式返回 usage（OpenAI 兼容服务商默认不返回，需显式开启），
-          // 这样 Trace 瀑布的 LLM span 才能展示真实 prompt/completion tokens。
-          stream_options: { include_usage: true },
-        }),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
 
@@ -51,6 +58,9 @@ export class OpenAICompatibleAdapter implements LLMAdapter {
 
       const decoder = new TextDecoder();
       let buffer = '';
+
+      // 流式 tool_calls 累积:OpenAI 按 index 分片下发 id/name/arguments
+      const toolAccum = new Map<number, { id: string; name: string; arguments: string }>();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -89,13 +99,35 @@ export class OpenAICompatibleAdapter implements LLMAdapter {
                 }
               : undefined;
 
-            yield {
+            // 原生 tool_calls 增量:合并同一 index 的 id/name/arguments 片段
+            if (Array.isArray(deltaObj.tool_calls)) {
+              for (const tc of deltaObj.tool_calls) {
+                const idx = typeof tc.index === 'number' ? tc.index : toolAccum.size;
+                const cur = toolAccum.get(idx) || { id: '', name: '', arguments: '' };
+                if (tc.id) cur.id = tc.id;
+                if (tc.function?.name) cur.name = tc.function.name;
+                if (tc.function?.arguments) cur.arguments += tc.function.arguments;
+                toolAccum.set(idx, cur);
+              }
+            }
+
+            const chunk: TokenChunk = {
               content: delta,
               done: !!finishReason,
               finishReason,
               reasoning,
               usage,
             };
+
+            // 本轮结束且存在 tool_calls:一次性产出完整工具调用列表(供 gateway tool loop)
+            if (finishReason && toolAccum.size > 0) {
+              const toolCalls: ToolCall[] = [...toolAccum.values()]
+                .filter(t => t.name)
+                .map(t => ({ id: t.id || `call_${toolAccum.size}_${Math.random().toString(36).slice(2, 8)}`, name: t.name, arguments: t.arguments || '{}' }));
+              if (toolCalls.length > 0) chunk.toolCalls = toolCalls;
+            }
+
+            yield chunk;
 
             if (finishReason) return;
           } catch {

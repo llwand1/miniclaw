@@ -1,4 +1,4 @@
-import { LLMAdapter, ChatRequest, TokenChunk, ModelListRequest } from './types';
+import { LLMAdapter, ChatRequest, TokenChunk, ToolCall, ModelListRequest } from './types';
 import { createLogger } from '../logger';
 const log = createLogger('adapter:anthropic');
 
@@ -26,6 +26,45 @@ export class AnthropicAdapter implements LLMAdapter {
     }
 
     try {
+      const body: Record<string, unknown> = {
+        model: req.model,
+        messages: nonSystemMsgs.map(m => {
+          // 原生 tool 消息:assistant 带 tool_use 内容块 / tool 角色转成 user(tool_result)
+          if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+            return {
+              role: 'assistant',
+              content: [
+                ...(m.content ? [{ type: 'text' as const, text: m.content }] : []),
+                ...m.toolCalls.map((tc: ToolCall) => ({
+                  type: 'tool_use' as const,
+                  id: tc.id,
+                  name: tc.name,
+                  input: safeParse(tc.arguments),
+                })),
+              ],
+            };
+          }
+          if (m.role === 'tool') {
+            return {
+              role: 'user',
+              content: [{ type: 'tool_result' as const, tool_use_id: m.toolCallId, content: m.content }],
+            };
+          }
+          return { role: m.role, content: m.content };
+        }),
+        system: systemMsg?.content,
+        temperature: req.temperature ?? 0.7,
+        stream: true,
+      };
+      // 原生工具:仅当传入 tools 时带上(Anthropic 格式:name/description/input_schema)
+      if (req.tools && req.tools.length > 0) {
+        body.tools = req.tools.map(t => ({
+          name: t.function.name,
+          description: t.function.description || '',
+          input_schema: t.function.parameters || { type: 'object', properties: {} },
+        }));
+      }
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -33,13 +72,7 @@ export class AnthropicAdapter implements LLMAdapter {
           'x-api-key': req.apiKey,
           'anthropic-version': '2023-06-01',
         },
-        body: JSON.stringify({
-          model: req.model,
-          messages: nonSystemMsgs.map(m => ({ role: m.role, content: m.content })),
-          system: systemMsg?.content,
-          temperature: req.temperature ?? 0.7,
-          stream: true,
-        }),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
 
@@ -53,6 +86,9 @@ export class AnthropicAdapter implements LLMAdapter {
 
       const decoder = new TextDecoder();
       let buffer = '';
+
+      // 流式 tool_use 累积:content_block_start(定义 id/name)+ input_json_delta(累积 arguments)
+      const toolAccum = new Map<number, { id: string; name: string; arguments: string }>();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -72,15 +108,39 @@ export class AnthropicAdapter implements LLMAdapter {
           }
           try {
             const parsed = JSON.parse(data);
+            // 文本增量(兼容带 type:text_delta 与不带 type 的两种网关)
             if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
               yield { content: parsed.delta.text, done: false };
             }
+            // tool_use 块开始:id + name
+            if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
+              const idx = typeof parsed.index === 'number' ? parsed.index : toolAccum.size;
+              toolAccum.set(idx, {
+                id: parsed.content_block.id || '',
+                name: parsed.content_block.name || '',
+                arguments: '',
+              });
+            }
+            // tool_use 参数增量(JSON 片段累积)
+            if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'input_json_delta' && typeof parsed.delta.partial_json === 'string') {
+              const idx = typeof parsed.index === 'number' ? parsed.index : toolAccum.size - 1;
+              const cur = toolAccum.get(idx);
+              if (cur) cur.arguments += parsed.delta.partial_json;
+            }
+            // 结束:stop_reason = tool_use → 产出完整 tool_calls
             if (parsed.type === 'message_delta' && parsed.delta?.stop_reason) {
-              yield {
+              const chunk: TokenChunk = {
                 content: '',
                 done: true,
                 finishReason: parsed.delta.stop_reason,
               };
+              if (parsed.delta.stop_reason === 'tool_use' && toolAccum.size > 0) {
+                const toolCalls: ToolCall[] = [...toolAccum.values()]
+                  .filter(t => t.name)
+                  .map(t => ({ id: t.id || `toolu_${Date.now().toString(36)}`, name: t.name, arguments: t.arguments || '{}' }));
+                if (toolCalls.length > 0) chunk.toolCalls = toolCalls;
+              }
+              yield chunk;
               return;
             }
           } catch {
@@ -99,4 +159,10 @@ export class AnthropicAdapter implements LLMAdapter {
   async listModels(_config?: ModelListRequest): Promise<string[]> {
     return ['claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307'];
   }
+}
+
+/** 容错解析 tool arguments JSON(非法时返回空对象) */
+function safeParse(s: string): Record<string, unknown> {
+  if (!s) return {};
+  try { return JSON.parse(s); } catch { return {}; }
 }

@@ -272,7 +272,6 @@ export default function PreviewPage({ initialHtml }: { initialHtml?: string | nu
   const closeActive = () => {
     if (!activeId) return;
     const id = activeId;
-    previewClient.close(id);
     previewClient.remove(id);
     setActiveId(null);
   };

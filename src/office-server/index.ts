@@ -5,6 +5,7 @@ import { createApiRouter } from './routes/api';
 import { Gateway } from '../core/gateway';
 import { createLogger } from '../core/logger';
 import { originCheck, corsWhitelist } from '../core/security/originCheck';
+import { SessionStateStore } from '../core/gateway/session-state';
 
 const serverLog = createLogger('server');
 const PORT = parseInt(process.env.PORT || '18791', 10);
@@ -13,7 +14,7 @@ export function createServer(gateway: Gateway, webPath?: string): http.Server {
   const app = express();
 
   // 安全：CORS 严格白名单（替换原 app.use(cors()) 全开）
-  // 仅允许本机 dev server (5173) 与 Electron file:// 同源请求
+  // 仅允许本机 dev server (5173) 与同源请求
   app.use(cors({ origin: corsWhitelist, credentials: false }));
   app.use(express.json({ limit: '2mb' })); // 安全：限制请求体大小，防大 payload DoS
 
@@ -21,10 +22,14 @@ export function createServer(gateway: Gateway, webPath?: string): http.Server {
     app.use(express.static(webPath));
   }
 
+  // 会话实时状态快照：每个会话的 UI 状态（阶段/步骤/任务清单/思考/Trace）独立存储，
+  // 供 /api/sessions/:id/live 查询与前端切回会话时恢复（架构独立性加强）。
+  const sessionStates = new SessionStateStore();
+
   // 安全：Origin 校验中间件，防御 DNS rebinding 与跨源写操作
   app.use('/api', originCheck);
   app.use('/auth', originCheck);
-  app.use('/api', createApiRouter(gateway));
+  app.use('/api', createApiRouter(gateway, sessionStates));
 
   // sessionId -> 该会话的 SSE 连接集合；只向对应会话推送 token（修复 P1-1 串台）
   const streamClients = new Map<string, Set<http.ServerResponse>>();
@@ -67,11 +72,14 @@ export function createServer(gateway: Gateway, webPath?: string): http.Server {
         tokenBuffer.delete(sid);
         bufferSeen.delete(sid);
       }
+      // 新一轮对话：快照从干净状态起步（清掉上一轮残留步骤/清单/思考）。
+      sessionStates.start(sid);
     }
     pushBuffer(sid, { type: 'token', ...data });
     broadcast({ type: 'token', ...data });
     // 该轮结束：延迟清缓冲（容让「刚结束时才连上」的客户端回放），此后再次重连不再回放旧轮。
     if (data.done) {
+      sessionStates.finish(sid, true);
       setTimeout(() => { tokenBuffer.delete(sid); bufferSeen.delete(sid); }, 2000);
     }
   });
@@ -82,6 +90,7 @@ export function createServer(gateway: Gateway, webPath?: string): http.Server {
   // 失败事件：广播给对应会话，前端据此给出明确的失败反馈
   gateway.on('chat-error', (data: any) => {
     const sid = data.sessionId;
+    sessionStates.finish(sid, false, data.error);
     pushBuffer(sid, { type: 'chat-error', ...data });
     broadcast({ type: 'chat-error', ...data });
     // 该轮异常结束：延迟清缓冲，避免重连回放旧轮错误污染下一轮（容让「刚失败时连上」的客户端）。
@@ -90,25 +99,30 @@ export function createServer(gateway: Gateway, webPath?: string): http.Server {
   // 简易 Trace：实时增量（start/span）走缓冲+广播（兼容「新会话先发后连」竞态），
   // 最终完整 payload 仅广播（校准用，丢包不影响已收增量）。
   gateway.on('trace-start', (data: any) => {
+    sessionStates.setTrace(data.sessionId, data.trace); // 基线 payload（含 root span）
     pushBuffer(data.sessionId, { type: 'trace-start', ...data });
     broadcast({ type: 'trace-start', ...data });
   });
   gateway.on('trace-span', (data: any) => {
+    sessionStates.pushTraceSpan(data.sessionId, data.span); // 增量子 span（前端边收边画）
     pushBuffer(data.sessionId, { type: 'trace-span', ...data });
     broadcast({ type: 'trace-span', ...data });
   });
   gateway.on('trace', (data: any) => {
+    sessionStates.setTrace(data.sessionId, data); // 最终校准 payload
     broadcast({ type: 'trace', ...data });
   });
   // 工具调用步骤：结构化 step 事件（前端「工具调用提示」卡片），走缓冲+广播
   // （兼容「新会话先发后连」竞态，与 token 同一套机制）。
   gateway.on('step', (data: any) => {
+    sessionStates.upsertStep(data.sessionId, data.step);
     pushBuffer(data.sessionId, { type: 'step', ...data });
     broadcast({ type: 'step', ...data });
   });
   // 任务规划清单：规划阶段 [TODO:...] 步骤清单（WorkBuddy 式任务清单），走缓冲+广播，
   // 前端实时展示并随 step 完成逐个打勾。
   gateway.on('todos', (data: any) => {
+    sessionStates.setTodos(data.sessionId, data.todos);
     pushBuffer(data.sessionId, { type: 'todos', ...data });
     broadcast({ type: 'todos', ...data });
   });
@@ -121,6 +135,7 @@ export function createServer(gateway: Gateway, webPath?: string): http.Server {
   // 思考/推理内容（reasoning_content，如 DeepSeek-R1 / OpenAI o 系列）：独立事件，
   // 走缓冲+广播（与 token 同机制），前端以可折叠「思考过程」块实时渲染。
   gateway.on('reasoning', (data: any) => {
+    sessionStates.appendReasoning(data.sessionId, data.content);
     pushBuffer(data.sessionId, { type: 'reasoning', ...data });
     broadcast({ type: 'reasoning', ...data });
   });
@@ -180,7 +195,10 @@ export function createServer(gateway: Gateway, webPath?: string): http.Server {
   const heartbeat = setInterval(() => {
     const now = Date.now();
     for (const [sid, t] of bufferSeen) {
-      if (now - t > 60_000 && !(streamClients.get(sid)?.size)) {
+      // 该会话仍在后台生成（任务未完成）时保留缓冲：用户切走再切回需要回放
+      // step/todos/reasoning/trace-start 等实时状态，否则进行中的 UI 提示会丢失。
+      const stillRunning = gateway.getRunningTasks().some(x => x.sessionId === sid && x.phase !== 'done' && x.phase !== 'error');
+      if (now - t > 60_000 && !(streamClients.get(sid)?.size) && !stillRunning) {
         tokenBuffer.delete(sid);
         bufferSeen.delete(sid);
       }

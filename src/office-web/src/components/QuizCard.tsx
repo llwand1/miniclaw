@@ -1,4 +1,4 @@
-// QuizCard —— quiz-generator 技能的选择题卡片（主窗 ChatPage 与悬浮窗 FloatingApp 共用）。
+// QuizCard —— quiz-generator 技能的选择题卡片（主窗 ChatPage 使用）。
 //
 // 解析 assistant 文本里的 [QUIZ]...[/QUIZ] JSON，渲染为可交互选择题卡片：
 // 题干 + A/B/C/D 选项（单选/多选点选）→「查看答案」→ 对错判定 + 答案解析。
@@ -51,11 +51,42 @@ function Cross({ size = 13, color = C.red }: { size?: number; color?: string }) 
 export function QuizCard({ data, streaming }: { data: QuizData; streaming?: boolean }) {
   const [sel, setSel] = useState<Record<number, string[]>>({});
   const [reveal, setReveal] = useState<Record<number, boolean>>({});
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  async function saveToBank() {
+    if (saving || saved) return;
+    setSaving(true);
+    try {
+      const resp = await fetch('/api/quiz-bank', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data, source: 'ai' }),
+      });
+      if (resp.ok) setSaved(true);
+    } catch { /* ignore */ }
+    setSaving(false);
+  }
   return (
     <div style={{ border: '1px solid ' + C.hair, background: C.glass, borderRadius: 12, padding: '10px 12px', margin: '0 0 10px', fontSize: 13, boxShadow: '0 1px 6px rgba(0,0,0,.06)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: C.muted, fontWeight: 600, marginBottom: 8 }}>
         <Check size={12} color={C.accent} /> {data.title || '选择题'}
         {streaming && <span style={{ display: 'inline-block', width: 7, height: 14, marginLeft: 4, background: C.accent, animation: 'qcCaret 1s step-end infinite' }} />}
+        <span style={{ flex: 1 }} />
+        {/* 收藏到题库：把 AI 出的这套题存入题库，供反复练习 */}
+        <button
+          onClick={saveToBank}
+          disabled={saving || saved || streaming}
+          title={saved ? '已收藏到题库' : '收藏到题库（可反复练习）'}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            padding: '3px 10px', borderRadius: 7, border: 'none',
+            background: saved ? 'rgba(52,199,89,.14)' : 'rgba(99,102,241,.12)',
+            color: saved ? '#1a7f37' : C.accent,
+            cursor: saving || saved || streaming ? 'default' : 'pointer',
+            fontSize: 11, fontWeight: 600, opacity: streaming ? 0.5 : 1,
+          }}>
+          {saved ? '✓ 已收藏' : saving ? '保存中…' : '☆ 收藏到题库'}
+        </button>
       </div>
       {data.questions.map((q, qi) => {
         const mySel = sel[qi] || [];

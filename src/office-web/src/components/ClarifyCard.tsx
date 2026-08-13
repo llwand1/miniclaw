@@ -1,4 +1,4 @@
-// ClarifyCard —— 需求澄清卡片（grill-me 风格，主窗 ChatPage 与悬浮窗 FloatingApp 共用）。
+// ClarifyCard —— 需求澄清卡片（grill-me 风格，主窗 ChatPage 使用）。
 //
 // 模型在规划阶段输出 [ASK:{json}] 后，服务端挂起生成并通过 SSE 下发 clarify 事件；
 // 前端渲染本卡片，用户点选选项（或输入自定义答案）后提交到 /api/chat/clarify，

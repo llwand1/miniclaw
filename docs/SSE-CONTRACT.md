@@ -1,6 +1,6 @@
 # SSE / HTTP 接口契约
 
-本文档定义 MiniClaw（本地 Web 服务形态）前后端之间的 **稳定接口契约**。MiniClaw 是单一形态的
+本文档定义 studentbuddy（本地 Web 服务形态）前后端之间的 **稳定接口契约**。studentbuddy 是单一形态的
 本地 Web 应用——前端（React）与后端（Express + SSE）同源运行，任何新增前后端交互都应先在此
 登记，再实现，保持契约收敛。
 
@@ -34,7 +34,7 @@
 | `trace-start` | 后端→前端 | 请求开始（含未结束的 root span） | `sessionId`, `trace:TracePayload` |
 | `trace-span` | 后端→前端 | 单个 Span 起/止增量 | `sessionId`, `phase:'start'\|'end'`, `span:Span` |
 | `trace` | 后端→前端 | 请求结束的完整 Trace（校准用） | `sessionId`, `...TracePayload` |
-| `step` | 后端→前端 | 工具调用步骤（搜索/抓取） | `sessionId`, `step:Step` |
+| `step` | 后端→前端 | 工具调用步骤(原生 function call 或文本标记触发的搜索/抓取/文件操作) | `sessionId`, `step:Step` |
 | `ping` | 后端→前端 | 心跳保活 | — |
 
 > `trace-start` / `trace-span` / `step` 均走"缓冲 + 广播"，兼容竞态；`trace`（完整校准）仅广播不缓冲。
@@ -101,19 +101,21 @@
 ```ts
 {
   stepId: string;
-  name: string;              // "联网搜索" / "抓取网页"
-  tool: 'search' | 'fetch';
+  name: string;              // "联网搜索" / "抓取网页" / "读取文件" / "编辑文件" ...
+  tool: 'search' | 'fetch' | 'fs';
   status: 'running' | 'done';   // 失败统一经 chat-error 上报
-  args: string[];            // 搜索词数组 或 URL 数组
+  args: string[];            // 搜索词数组 / URL 数组 / 工具参数 JSON 字符串
   result?: string;           // 完成摘要，如 "已搜索 2 个关键词"
   startedAt: number;
   endedAt?: number;
 }
 ```
 
-- 触发条件：模型在回复中写入 `[SEARCH:关键词]` / `[FETCH:url]` 标记（由 `gateway.extractSearchQueries` / `extractUrls` 解析）。
-- 一次请求可能先后产生 `search` 与 `fetch` 两个 step（各自独立 stepId）。
-- 前端在助手回答**之前**渲染 `ToolSteps` 卡片：spinner → ✓，可展开看 `args` / `result`。
+- **触发方式(双路径并行)**：
+  1. **原生 function call(2026-08-12 新增,优先)**：网关 `runNativeToolLoop` 带 `tools` 参数请求模型(OpenAI function calling / Anthropic tools),模型返回 `tool_calls` 时由 `executeNativeToolCall` 逐个执行并 emit `step`。工具清单:`search_web` / `fetch_page`(联网搜索启用时)+ `fs_read` / `fs_grep` / `fs_edit` / `fs_write`(工作区配置时);`tool` 字段取 `search` / `fetch` / `fs`。
+  2. **文本标记(兼容回退)**：模型在回复中写入 `[SEARCH:关键词]` / `[FETCH:url]` / `[FS]...[/FS]` 标记(由 `gateway.extractSearchQueries` / `extractUrls` / `extractFsTools` 解析),当模型未走原生工具时触发。
+- 一次请求可能先后产生多个 step(搜索、抓取、文件读写,各自独立 stepId);原生工具循环最多 `MAX_TOOL_TURNS=8` 轮,超限发 `chat-error`。
+- 前端在助手回答**之前**渲染 `ToolSteps` 卡片：spinner → ✓,可展开看 `args` / `result`;`tool='fs'` 用文件图标,`search`/`fetch` 用搜索/地球图标。
 
 ---
 
@@ -131,7 +133,7 @@
 | GET | `/model-options` | 可选模型列表 |
 | POST | `/chat/abort` | 中止对话 `{sessionId}` |
 | GET/POST/PUT/DELETE | `/sessions` `/sessions/:id` | 会话 CRUD（含软删除、置顶、重命名、恢复） |
-| POST | `/sessions/:id/share` | 导出 Markdown + 分享令牌 `miniclaw://share/<token>`（令牌无协议消费者，待评估） |
+| POST | `/sessions/:id/share` | 导出 Markdown + 分享令牌 `studentbuddy://share/<token>`（令牌无协议消费者，待评估） |
 | GET/POST/PUT/DELETE | `/providers` `/providers/:id` | 服务商 CRUD、启用切换、连通性测试 |
 | GET/PUT | `/search-config` | 联网搜索开关与 provider（duckduckgo / custom） |
 | GET | `/search?q=` | 手动搜索（测试用） — **待删除**（无前端调用） |
@@ -155,7 +157,7 @@
 
 ## 7. 前端渲染映射（事件 → 组件）
 
-后端只管"切事件"，前端按 `type` 渲染富组件——这是 MiniClaw 能复刻 WorkBuddy / OpenCode 级别回复效果的关键。
+后端只管"切事件"，前端按 `type` 渲染富组件——这是 studentbuddy 能复刻 WorkBuddy / OpenCode 级别回复效果的关键。
 映射集中在 `src/office-web/src/pages/ChatPage.tsx`，消费点见各 `if (d.type === ...)` 分支。
 
 | 事件 | 累积状态 | 组件 | 渲染行为 |
@@ -166,7 +168,7 @@
 
 > **预览 iframe 的 sandbox 按来源分级**（见 `src/shared/preview-types.ts` `previewSandbox`）：
 > - 可信来源（`ai` 本地 AI 产出 / `user` 用户编写）：`allow-scripts allow-same-origin allow-forms allow-popups allow-modals`——localStorage、同源 fetch、表单、弹窗、alert 均可用，对齐 WorkBuddy 预览能力。
-> - 不可信来源（`import` 外部导入）：回退到 `allow-scripts`（不透明源），防止恶意 HTML 与 MiniClaw 主程序同源后读取 app 的 localStorage（OAuth / API key 等）。
+> - 不可信来源（`import` 外部导入）：回退到 `allow-scripts`（不透明源），防止恶意 HTML 与 studentbuddy 主程序同源后读取 app 的 localStorage（OAuth / API key 等）。
 | `token` | `m.content:string`（本轮完整正文）| `MarkdownStream` | **真正的流式 Markdown**：按块（标题/段落/代码/列表/表格/引用）切分，稳定 key 防重播，仅新增块淡入 + 末尾 caret；代码块轻量语法高亮（`.mc-kw`/`.mc-ty`）|
 | `trace-start`/`trace-span`/`trace` | `trace` 状态（函数式 `mergeTraceSpan()`）| Trace 面板 | 请求开始自动展开，标出各 Span 耗时/状态，失败段标红 |
 | `chat-error` | `m.error` | 错误条 | 终止本轮，思考块/工具卡片冻结，正文区显示错误 |
@@ -174,7 +176,7 @@
 ### 渲染层契约要点（对接正式版必须保持）
 
 1. **正文是 Markdown，不是纯文本**。任何新前端形态（Web / 移动壳）都必须用 Markdown 渲染器消费 `token.content`，否则会退化成"哑"纯文本流。
-2. **稳定 key 分块**：流式累积文本时按"块"而非"行"做稳定 key，已渲染块内容不变则不重绘，避免重播闪烁。MiniClaw 的 `MarkdownStream` 用块索引做 key。
+2. **稳定 key 分块**：流式累积文本时按"块"而非"行"做稳定 key，已渲染块内容不变则不重绘，避免重播闪烁。studentbuddy 的 `MarkdownStream` 用块索引做 key。
 3. **增量合并**：`reasoning`/`token` 用函数式 setState 累积；`step`/`trace` 用专用 merge 函数保证实时无闪烁。
 4. **artifact 走独立通道**：`previewClient` 通配订阅所有会话，与主聊天 SSE 解耦，保证预览面板在任意会话/分栏下都能收到。
 
@@ -182,7 +184,7 @@
 
 ## 8. 文件工程能力（对标 OpenCode / Cursor 的「工作区」）
 
-MiniClaw 通过「沙箱文件工具 + 工作区浏览器」补齐 AI IDE 的文件读写/编辑/搜索能力。所有文件操作被严格限制在配置的**工作区根目录**内（`fs-tools.resolveSafe` 拦截一切越界），杜绝 AI 伪造请求或越权访问。
+studentbuddy 通过「沙箱文件工具 + 工作区浏览器」补齐 AI IDE 的文件读写/编辑/搜索能力。所有文件操作被严格限制在配置的**工作区根目录**内（`fs-tools.resolveSafe` 拦截一切越界），杜绝 AI 伪造请求或越权访问。
 
 ### 8.1 文件工具循环（gateway 侧）
 

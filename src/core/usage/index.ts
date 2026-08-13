@@ -59,7 +59,7 @@ function readProviderNameMap(dbPath: string): Map<string, string> {
   return m;
 }
 
-// ─── MiniClaw 自身用量 ───────────────────────────────────────────────
+// ─── studentbuddy 自身用量 ───────────────────────────────────────────────
 
 export function getOwnUsageStats(dbPath: string, period: Period): { rows: UsageRow[]; totals: UsageTotals } {
   const db = getDb();
@@ -145,7 +145,7 @@ export function getCcSwitchUsage(dbPath: string): CcSwitchUsage {
   }
 }
 
-// ─── 从 cc-switch 同步服务商到 MiniClaw ─────────────────────────────
+// ─── 从 cc-switch 同步服务商到 studentbuddy ─────────────────────────────
 
 export interface SyncResult {
   added: { name: string; type: string }[];

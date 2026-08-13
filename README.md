@@ -1,8 +1,8 @@
-# MiniClaw
+# studentbuddy
 
 > 本地优先的 AI 助手 · 以本地 Web 服务形态交付 · v0.1.0
 
-MiniClaw 是一个本地优先的 AI 助手：基于 **Express + React/Vite + TypeScript**，所有数据
+studentbuddy 是一个本地优先的 AI 助手：基于 **Express + React/Vite + TypeScript**，所有数据
 （会话、记忆、服务商配置、调用链）存在本地 SQLite，不上云。它把"联网搜索 → 多轮对话 →
 工具调用可视化 → 调用链 Trace"做成开箱即用的体验，以**本地 Web 服务**形态交付：启动
 `scripts/dev-server.ts` 后，浏览器访问 `http://127.0.0.1:18791` 即获得全部能力。
@@ -37,14 +37,14 @@ MiniClaw 是一个本地优先的 AI 助手：基于 **Express + React/Vite + Ty
                         浏览器访问 http://127.0.0.1:18791（同源访问）
 ```
 
-> **设计要点**：MiniClaw 的"能力"全部在 `office-server`（Express + SSE）和
+> **设计要点**：studentbuddy 的"能力"全部在 `office-server`（Express + SSE）和
 > `src/office-web`（React）里，通过 `Gateway` 事件总线连接。前端即浏览器页面，
 > 与后端同源访问，无需任何跨域/原生壳支持。生产态由 Express 直接托管 `dist/web`。
 
 ### 目录结构
 
 ```
-MiniClaw/
+studentbuddy/
 ├─ scripts/
 │  ├─ build.js              # 构建脚本（Vite 前端 → dist/web + tsc 后端 → dist/）
 │  └─ dev-server.ts         # Web 服务形态启动入口（Node 20）
@@ -84,7 +84,7 @@ cd src/office-web && npm install && cd ../..
 
 ### 2. 配置 AI 服务商
 
-MiniClaw 通过 OpenAI 兼容协议对接任意大模型。首次启动后在设置页添加服务商：
+studentbuddy 通过 OpenAI 兼容协议对接任意大模型。首次启动后在设置页添加服务商：
 
 - `type`: `openai`
 - `baseUrl`: 如 `https://api.openai.com/v1` 或自建网关
@@ -139,3 +139,4 @@ npm run web:dev
 
 - [`docs/SSE-CONTRACT.md`](docs/SSE-CONTRACT.md) — SSE 事件与 HTTP 接口契约（前端对接核心）
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 架构深读、数据层、事件总线
+- [docs/PROJECT-ASSESSMENT-2026-08-12.md](docs/PROJECT-ASSESSMENT-2026-08-12.md) — 项目含金量评估（多维评分 / vibe coding 横向定位 / 求职场景 / 改进优先级）

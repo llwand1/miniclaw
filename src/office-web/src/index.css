@@ -1,4 +1,4 @@
-/* ─── MiniClaw 全局样式 + 主题系统 ─── */
+/* ─── studentbuddy 全局样式 + 主题系统 ─── */
 
 /* ═══ 重置 ═══ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -142,7 +142,7 @@ input:focus, textarea:focus, select:focus, button:focus-visible {
 }
 .theme-pop { display: inline-flex; animation: themePop .45s cubic-bezier(.2, .8, .2, 1); }
 
-/* ═══ QuizCard 流式光标闪烁（主窗 + 悬浮窗共用，全局定义避免 mcCaret 未定义） ═══ */
+/* ═══ QuizCard 流式光标闪烁（全局定义避免 mcCaret 未定义） ═══ */
 @keyframes qcCaret {
   50% { opacity: 0; }
 }

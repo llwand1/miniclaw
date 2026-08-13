@@ -279,16 +279,16 @@ export function UsageDashboard({
 }) {
   const data = useMemo(buildSeries, []);
 
-  // 卡片数值（取后端真实数据；MiniClaw 未单独追踪缓存，缺失即 0，不显示设计稿占位值）
+  // 卡片数值（取后端真实数据；studentbuddy 未单独追踪缓存，缺失即 0，不显示设计稿占位值）
   const t = ownStats?.totals || {};
   const totalTokens = t.totalTokens || 0;
   const totalRequests = t.requests || (ccStats?.totals?.requests || 0);
   const totalCost = t.costUsd || 0;
   const inputTokens = t.promptTokens || 0;
   const outputTokens = t.completionTokens || 0;
-  const cacheCreateTokens = 0; // MiniClaw 未单独追踪缓存创建
-  const cacheHitTokens = 0;    // MiniClaw 未单独追踪缓存命中
-  const cacheHitRate = 0;      // MiniClaw 未单独追踪缓存命中率
+  const cacheCreateTokens = 0; // studentbuddy 未单独追踪缓存创建
+  const cacheHitTokens = 0;    // studentbuddy 未单独追踪缓存命中
+  const cacheHitRate = 0;      // studentbuddy 未单独追踪缓存命中率
 
   return (
     <div style={{ background: C.bg, minHeight: '100%', padding: 20, fontFamily: 'system-ui, "PingFang SC", "Microsoft YaHei", sans-serif' }}>

@@ -29,7 +29,7 @@ export interface SecurityPolicy {
   maxReadBytes: number;
   /** 审批模式：auto_approve = AI 写入直接落盘；require_approval = 进审批队列。 */
   approvalMode: 'auto_approve' | 'require_approval';
-  /** 沙箱开关：true 时 AI 写入先落 .miniclaw-sandbox/ 暂存区。 */
+  /** 沙箱开关：true 时 AI 写入先落 .studentbuddy-sandbox/ 暂存区。 */
   sandboxEnabled: boolean;
 }
 
@@ -46,7 +46,7 @@ export const DEFAULT_POLICY: SecurityPolicy = {
     '.pypirc',
     'id_rsa',
     'id_ed25519',
-    '.miniclaw-sandbox', // 沙箱暂存区本身不让 AI 碰
+    '.studentbuddy-sandbox', // 沙箱暂存区本身不让 AI 碰
   ],
   extensionAllowlist: [
     'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs',

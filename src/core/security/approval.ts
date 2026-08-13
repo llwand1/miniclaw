@@ -4,7 +4,7 @@
  * 工作流（参考 OpenAI Codex 沙箱审批 + Cline diff 审批）：
  * 1) AI 通过 [FS] 块请求 write/edit。
  * 2) 若 approvalMode === 'require_approval'：
- *    - 沙箱开启时：变更先落到 <工作区>/.miniclaw-sandbox/<changeId>/ 下，
+ *    - 沙箱开启时：变更先落到 <工作区>/.studentbuddy-sandbox/<changeId>/ 下，
  *      生成 diff，推 file-change 事件给前端审批队列。
  *    - 沙箱关闭时：直接写入目标文件，但同时推 file-change 事件供前端撤销。
  * 3) 用户在设置页/审批队列里「批准」→ 若沙箱开启，把暂存内容 apply 到目标文件。
@@ -24,7 +24,7 @@ import { createLogger } from '../logger';
 
 const log = createLogger('approval');
 
-export const SANDBOX_DIR = '.miniclaw-sandbox';
+export const SANDBOX_DIR = '.studentbuddy-sandbox';
 
 /** 审批队列项。 */
 export interface ApprovalItem {
@@ -108,7 +108,7 @@ function rowToItem(r: any): ApprovalItem {
 
 // ─── 沙箱暂存 ────────────────────────────────────────────────────
 
-/** 获取沙箱根目录绝对路径（工作区下 .miniclaw-sandbox/）。 */
+/** 获取沙箱根目录绝对路径（工作区下 .studentbuddy-sandbox/）。 */
 export function getSandboxRoot(): string | null {
   const root = getWorkspaceRoot();
   if (!root) return null;
@@ -119,7 +119,7 @@ export function getSandboxRoot(): string | null {
 
 /**
  * 把待写入内容暂存到沙箱。返回沙箱绝对路径。
- * 暂存文件命名：.miniclaw-sandbox/<changeId>（单文件，内容即 after）。
+ * 暂存文件命名：.studentbuddy-sandbox/<changeId>（单文件，内容即 after）。
  */
 export function stageToSandbox(changeId: string, after: string): string {
   const sb = getSandboxRoot();

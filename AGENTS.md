@@ -1,12 +1,12 @@
-# AGENTS.md — MiniClaw 项目导航
+# AGENTS.md — studentbuddy 项目导航
 
-> 本文件是 AI agent 改 MiniClaw 功能时的**第一入口**。
+> 本文件是 AI agent 改 studentbuddy 功能时的**第一入口**。
 > 改任何功能前，先读这张表定位，再用 `read_symbol` / `list_symbols` 精确读取，避免 `read_file` 全文加载浪费 token。
 
 ## 项目一句话
 
 本地优先的 AI 助手（**本地 Web 服务形态**，浏览器访问 `127.0.0.1:18791`）。Node20 + TypeScript + React + better-sqlite3 + Express。
-分层：channel(主窗/悬浮窗) → gateway(路由+会话+SSE) → agent → adapter(OpenAI兼容/Anthropic)。
+分层：channel(主窗) → gateway(路由+会话+SSE) → agent → adapter(OpenAI兼容/Anthropic)。
 产品形态对标电脑版豆包。
 
 ## 目录速查
@@ -75,6 +75,18 @@
 | 自动沉淀 | `summarizeMemories(provider, history)` | 回复后异步提取 `[MEMO:内容\|A/B/C]` |
 | 记忆解析 | `extractMemos(text)` | 解析回复中的 `[MEMO:...]` 行 |
 
+### 后端原生工具循环（src/core/gateway/index.ts）
+
+> 原生 function call（2026-08-12 新增）：工具启用时优先走「模型原生 tools 参数 → tool_calls → 执行 → 回灌」，
+> 与文本标记路径（[SEARCH:]/[FS]）并行；模型未走原生工具时返回 null 交还原路径，完全向后兼容。
+
+| 功能 | 符号 | 说明 |
+|------|------|------|
+| 工具循环上限 | `MAX_TOOL_TURNS`（常量，=8） | 模型连续 tool_calls 最多执行轮数，防死循环 |
+| 构建工具清单 | `buildNativeTools(searchEnabled, workspaceConfigured)` | 按启用状态生成 `search_web`/`fetch_page`（搜索）+ `fs_read`/`fs_grep`/`fs_edit`/`fs_write`（工作区） |
+| 执行单个工具 | `executeNativeToolCall(sessionId, call, searchConfig, trace)` | 解析 JSON 参数 → 复用 performSearches/performFetches/fs-tools，emit step + file-change + Trace span |
+| 原生工具循环 | `runNativeToolLoop(...)` | 带 tools 请求 → tool_calls 执行 → `assistant(toolCalls)+tool(结果)` 回灌 → 循环；无 tool_calls 且未执行过工具时返回 null 交还原路径 |
+
 ### 后端启动种子（src/core/gateway/index.ts）
 
 > P0-1（2026-08-12 修复）：空库自动注入默认 provider + agent，开箱不再 500。
@@ -82,6 +94,20 @@
 | 功能 | 符号 | 说明 |
 |------|------|------|
 | 空库种子 | `seedIfEmpty`（private，`start()` 调用） | providers/agents 表为空时注入 `openai-default` provider（api_key 留空，用户设置页填写）+ `agents.id='default'`；幂等，仅空表注入 |
+
+### 后端文件上传 + 文本提取（src/core/upload.ts）
+
+> 2026-08-13 新增：纯 Web 形态浏览器拿不到本地路径，大文件/二进制只能先上传到服务端暂存（DATA_DIR/uploads/），
+> 再以 path 模式注入 AI。上传时按扩展名异步提取纯文本到伴生 `<uuid>.txt`，prompts.ts 注入时优先读伴生文件。
+> 单文件上限 50MB；扩展名黑名单与安全策略一致（exe/dll 等拒绝）。
+
+| 功能 | 符号 / 路由 | 说明 |
+|------|------------|------|
+| 上传保存 | `saveUpload(buffer, name)` | uuid 重命名落盘 + 异步提取文本写伴生 .txt；黑名单扩展名抛错 |
+| 文本提取 | `extractText(filePath, ext)` | pdf→pdf-parse v2、docx→mammoth、pptx/ppt→jszip 解 slide XML、文本类直接读 utf-8 |
+| 上传路由 | `POST /api/files/upload?name=`（routes/files.ts） | body 为文件原始字节（express.raw，limit 50MB，仅此路由放宽，其余仍 2mb） |
+| 上限查询 | `GET /api/files/upload-config` | 返回 maxBytes（设置页可展示） |
+| 附件注入 | `readAttachmentFile`（prompts.ts） | 优先读 `<path>.txt` 伴生提取文本，否则读原文件（≤20MB） |
 
 ### 后端数据库（src/core/gateway/db.ts）
 
@@ -122,19 +148,6 @@
 | Markdown 流式渲染 | `MarkdownStream` | L614 |
 | 选择题卡片 | `QuizCard` / `parseQuiz` / `AssistantBody` | L626（quiz-generator 技能：[QUIZ] JSON → 卡片） |
 | 外壳(侧边栏+分栏) | `ChatPage` | L1692 |
-
-### 前端悬浮窗（src/office-web/src/FloatingApp.tsx）
-
-> WorkBuddy 风格流程展示：SSE 消费 run-state（阶段推进）+ step（工具步骤），
-> 在悬浮窗内实时显示「思考中→搜索→抓取→撰写」阶段与工具调用卡片。
-
-| 功能 | 符号名 | 当前行号 |
-|------|--------|---------|
-| 工具步骤合并 | `mergeStep` | L14（文件头部） |
-| 阶段文案映射 | `flowPhaseLabel` | L25（文件头部） |
-| 任务清单渲染 | `todos` state + 内联 JSX | 消息列表底部（任务清单卡片） |
-| 流程面板渲染 | 内联 JSX（`busy \|\| steps.length > 0` 时显示） | 消息列表底部 |
-| 阶段/步骤状态 | `phase` / `steps` state | FloatingApp 内 |
 
 ### 前端预览页（src/office-web/src/pages/PreviewPage.tsx）
 

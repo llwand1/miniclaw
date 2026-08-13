@@ -1,5 +1,5 @@
-// 预览子系统共享类型 —— 主进程 / 渲染进程 / 未来适配层都可复用。
-// 纯类型 + 少量纯函数，不依赖 electron / DOM，可安全被 vite 与 tsc 同时编译。
+// 预览子系统共享类型 —— 服务端 / 渲染进程可复用。
+// 纯类型 + 少量纯函数，可安全被 vite 与 tsc 同时编译。
 
 /** artifact 的内容种类。 */
 export type ArtifactKind = 'html' | 'markdown' | 'code' | 'image' | 'url';
@@ -50,7 +50,7 @@ export interface PreviewLayout {
  * - 可信来源（本地 AI 产出 `ai` / 用户编写 `user`）：放开同源/表单/弹窗/模态，
  *   localStorage、同源 fetch、表单提交、window.open、alert 均可用，对齐 WorkBuddy 预览能力。
  * - 不可信来源（外部导入 `import`）：回退到仅 `allow-scripts`（不透明源），
- *   避免其与 MiniClaw 主程序同源后被恶意 HTML 读取 app 的 localStorage（OAuth/API key 等）。
+ *   避免其与 studentbuddy 主程序同源后被恶意 HTML 读取 app 的 localStorage（OAuth/API key 等）。
  */
 export function previewSandbox(source: ArtifactSource | undefined): string {
   return source === 'import'

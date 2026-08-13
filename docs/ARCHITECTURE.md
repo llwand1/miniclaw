@@ -1,8 +1,8 @@
 # 架构深读
 
-本文面向需要理解 MiniClaw 内部构造、或需要在此基础上扩展功能的开发者。
+本文面向需要理解 studentbuddy 内部构造、或需要在此基础上扩展功能的开发者。
 
-**MiniClaw 是双形态交付**：
+**studentbuddy 是双形态交付**：
 - **主形态 · 本地 Web 服务**：`scripts/dev-server.ts`（Node 20）启动 `Gateway` + `Express`（绑定 `127.0.0.1:18791`），浏览器访问 `http://127.0.0.1:18791` 获得全部能力。
 - **保留形态 · Electron 壳**：`src/cli/index.ts` 用 `BrowserWindow` / `Tray` / `globalShortcut` 拉起主窗 + 悬浮窗 + 托盘，壳内 `loadURL` 同一套 Web UI；预览在壳内走 `WebContentsView` 原生视图，Web 形态走 `PreviewPage` iframe。
 两种形态共享同一套 `office-server` + `office-web`。

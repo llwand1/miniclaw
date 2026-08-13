@@ -1,22 +1,27 @@
 {
-  "name": "miniclaw",
+  "name": "studentbuddy",
   "version": "0.1.0",
-  "description": "MiniClaw - 纯 Windows 桌面 AI 助手",
-  "main": "dist/cli/index.js",
+  "description": "studentbuddy - 纯 Web AI 助手（浏览器访问）",
   "scripts": {
     "build": "node scripts/build.js",
     "web": "tsx scripts/dev-server.ts",
     "web:dev": "concurrently -n api,ui \"tsx scripts/dev-server.ts\" \"cd src/office-web && node_modules\\.bin\\vite.cmd\"",
-    "electron": "npm run build && electron .",
-    "pack": "npm run build && electron-builder --win --config",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:daily": "node scripts/daily-test.cjs"
   },
   "license": "MIT",
-  "engines": { "node": ">=20.11.0" },
+  "engines": {
+    "node": ">=20.11.0"
+  },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.12.1",
+    "pdf-parse": "^2.4.5",
     "pino": "^9.5.0",
     "pino-pretty": "^13.0.0",
     "uuid": "^10.0.0"
@@ -27,28 +32,8 @@
     "@types/express": "^5.0.0",
     "@types/uuid": "^10.0.0",
     "concurrently": "^9.1.0",
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
-  },
-  "build": {
-    "appId": "com.miniclaw.app",
-    "productName": "MiniClaw",
-    "directories": { "output": "release" },
-    "files": ["dist/**/*", "config/*.example.json", "scripts/**/*", "node_modules/**/*"],
-    "extraResources": [{ "from": "dist/web", "to": "web", "filter": ["**/*"] }],
-    "win": { "target": ["nsis"], "icon": "build/icon.ico" },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "MiniClaw",
-      "uninstallDisplayName": "MiniClaw v0.1.0",
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico"
-    }
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.9"
   }
 }

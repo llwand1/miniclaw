@@ -2,7 +2,7 @@
  * security/crypto —— 密钥加密存储（AES-256-GCM）。
  *
  * 设计：
- * 1) 主密钥由 Windows DPAPI（CryptProtectData）派生，落盘到 %APPDATA%/MiniClaw/.mk。
+ * 1) 主密钥由 Windows DPAPI（CryptProtectData）派生，落盘到 %APPDATA%/studentbuddy/.mk。
  *    DPAPI 与当前 Windows 用户绑定，拷走 DB + .mk 到另一台机器/另一用户无法解密。
  * 2) providers.api_key、wechat_oauth_config.app_secret、github_tokens.access_token
  *    统一走 encryptSecret / decryptSecret。密文带 `enc:v1:` 前缀，便于幂等迁移。
@@ -118,7 +118,7 @@ try {
 
 /**
  * 用 DPAPI 包装主密钥。当前实现：退化为「文件明文 + 0600 权限」。
- * 之所以仍可接受：DB 被拷走时，.mk 不会被一起带走（位于 %APPDATA%/MiniClaw），
+ * 之所以仍可接受：DB 被拷走时，.mk 不会被一起带走（位于 %APPDATA%/studentbuddy），
  * 且 .mk 与 DB 同目录、用户能自行管控。
  *
  * 若要更强保护，后续可接入 Electron safeStorage（在主进程里）。

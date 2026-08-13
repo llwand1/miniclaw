@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>图解 MiniClaw 回复 UI · 渲染层契约</title>
+<title>图解 studentbuddy 回复 UI · 渲染层契约</title>
 <style>
   :root{
     --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#2b3440;
@@ -142,7 +142,7 @@
 <div class="wrap">
 
   <header class="hero">
-    <div class="badge">MINICLAW 回复 UI · 渲染层契约图解</div>
+    <div class="badge">studentbuddy 回复 UI · 渲染层契约图解</div>
     <h1>AI 回复界面是<span class="hl">怎么炼成的</span></h1>
     <p class="sub">对标 WorkBuddy 桌面/网页版：从「渲染层契约」→ 结构化事件流 → 组件化渲染，五块拼图，核心可交互演示</p>
     <nav class="toc">
@@ -263,7 +263,7 @@
   <!-- ============ 分区 3：后端事件契约 ============ -->
   <section id="s3">
     <div class="sec-head"><div class="sec-no">3</div><h2>后端契约：六种结构化 SSE 事件<span class="tag">SSE 形状</span></h2></div>
-    <p class="lead">Gateway 不吐裸 token，而是吐这六种带形状的事件。前端只认事件 type，不关心具体 UI。下面每个事件是真实 payload 示例（即 MiniClaw 的 <code>SSE-CONTRACT.md</code> 要扩展的目标）。
+    <p class="lead">Gateway 不吐裸 token，而是吐这六种带形状的事件。前端只认事件 type，不关心具体 UI。下面每个事件是真实 payload 示例（即 studentbuddy 的 <code>SSE-CONTRACT.md</code> 要扩展的目标）。
 
     <div class="stage">
       <div class="evt"><div class="ty">token</div><div class="ds"><b>正文增量</b>，前端 append 到 Markdown 渲染区。<pre>{ "type":"token", "content":"# 标题" }</pre></div></div>
@@ -325,14 +325,14 @@
 
     <details class="interview">
       <summary>ArtifactPanel 和普通回复正文有什么区别？</summary>
-      <div class="ans">正文是<strong>对话流的一部分</strong>（Markdown 文本）；Artifact 是<strong>独立、可复用的产物</strong>——一段 HTML、一个文件、一张图表。它不应该混在聊天气泡里滚动消失，而应放在侧边预览面板或独立标签页，支持<strong>反复查看 / 编辑 / 导出</strong>。WorkBuddy 的"artifact"就是此意。MiniClaw 目前完全没有这一层，是后续可补的亮点。</div>
+      <div class="ans">正文是<strong>对话流的一部分</strong>（Markdown 文本）；Artifact 是<strong>独立、可复用的产物</strong>——一段 HTML、一个文件、一张图表。它不应该混在聊天气泡里滚动消失，而应放在侧边预览面板或独立标签页，支持<strong>反复查看 / 编辑 / 导出</strong>。WorkBuddy 的"artifact"就是此意。studentbuddy 目前完全没有这一层，是后续可补的亮点。</div>
     </details>
   </section>
 
   <!-- ============ 分区 5：落地清单 ============ -->
   <section id="s5">
-    <div class="sec-head"><div class="sec-no">5</div><h2>落地到 MiniClaw：现状 vs 要补<span class="tag">行动清单</span></h2></div>
-    <p class="lead">对照上面契约，MiniClaw 目前有什么、还差什么。绿色是已具备，红色是要补的。这部分可直接回填进 <code>docs/SSE-CONTRACT.md</code> 与 <code>docs/ARCHITECTURE.md</code>。</p>
+    <div class="sec-head"><div class="sec-no">5</div><h2>落地到 studentbuddy：现状 vs 要补<span class="tag">行动清单</span></h2></div>
+    <p class="lead">对照上面契约，studentbuddy 目前有什么、还差什么。绿色是已具备，红色是要补的。这部分可直接回填进 <code>docs/SSE-CONTRACT.md</code> 与 <code>docs/ARCHITECTURE.md</code>。</p>
 
     <div class="grid2">
       <div class="card good">
@@ -370,7 +370,7 @@
   </section>
 
   <footer>
-    交互图解 · MiniClaw 回复 UI 渲染层契约 &nbsp;|&nbsp; 单文件零依赖，双击即开 · 对标 WorkBuddy
+    交互图解 · studentbuddy 回复 UI 渲染层契约 &nbsp;|&nbsp; 单文件零依赖，双击即开 · 对标 WorkBuddy
   </footer>
 </div>
 

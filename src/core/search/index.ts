@@ -27,7 +27,7 @@ async function duckduckgoSearch(query: string): Promise<SearchResponse> {
   const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
   log.info({ query }, 'DuckDuckGo search');
   const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MiniClaw/0.1.0' },
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) studentbuddy/0.1.0' },
     signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error(`DuckDuckGo API error: ${res.status}`);
@@ -55,7 +55,7 @@ async function duckduckgoLiteSearch(query: string): Promise<SearchResponse> {
   const url = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
   log.info({ query }, 'DuckDuckGo Lite search');
   const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MiniClaw/0.1.0' },
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) studentbuddy/0.1.0' },
     signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error(`DuckDuckGo Lite error: ${res.status}`);
@@ -128,7 +128,7 @@ export async function searchWeb(query: string, config?: SearchConfig): Promise<S
 export async function fetchPage(url: string): Promise<FetchedPage> {
   log.info({ url }, 'Fetch page');
   const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MiniClaw/0.1.0' },
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) studentbuddy/0.1.0' },
     signal: AbortSignal.timeout(10000),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

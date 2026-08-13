@@ -1,4 +1,4 @@
-import { LLMAdapter, TokenChunk, ChatMessage } from '../adapter/types';
+import { LLMAdapter, TokenChunk, ChatMessage, ToolDefinition } from '../adapter/types';
 import { OpenAICompatibleAdapter } from '../adapter/openai-compatible';
 import { AnthropicAdapter } from '../adapter/anthropic';
 import { createLogger } from '../logger';
@@ -52,6 +52,7 @@ export class AgentEngine {
     messages: ChatMessage[],
     temperature?: number,
     signal?: AbortSignal,
+    tools?: ToolDefinition[],
   ): AsyncIterable<TokenChunk> {
     // 简易 Trace：把本次 LLM 调用作为当前 Trace 的子 Span（从 gateway 注入的上下文取）
     const trace = tracer.active();
@@ -84,6 +85,7 @@ export class AgentEngine {
         stream: true,
         temperature,
         signal,
+        tools,
       });
 
       for await (const chunk of stream) {

@@ -1,6 +1,6 @@
 import io
 
-p = "C:/Users/llwan/Desktop/MiniClaw/src/office-web/src/pages/ChatPage.tsx"
+p = "C:/Users/llwan/Desktop/studentbuddy/src/office-web/src/pages/ChatPage.tsx"
 src = io.open(p, encoding="utf-8").read()
 
 start_marker = "// 把正文按行拆块渲染"

@@ -1,7 +1,6 @@
 @echo off
-title MiniClaw
+title studentbuddy Web Server (api:18791)
 cd /d "%~dp0.."
-set ELECTRON="%~dp0..\node_modules\.bin\electron.cmd"
 
 where node >nul 2>&1
 if %ERRORLEVEL% neq 0 (
@@ -24,12 +23,13 @@ if not exist "%CD%\src\office-web\node_modules" (
     cd ..\..
 )
 
-if not exist "%CD%\dist" (
-    echo [INFO] 构建项目...
+if not exist "%CD%\dist\web\index.html" (
+    echo [INFO] 构建前端...
     call node scripts\build.js
     if %ERRORLEVEL% neq 0 ( echo 失败 & pause & exit /b 1 )
 )
 
-echo [INFO] 启动 MiniClaw...
-%ELECTRON% .
+echo [INFO] 启动 studentbuddy Web 服务...
+echo [INFO] 浏览器访问 http://127.0.0.1:18791
+call npm run web
 if %ERRORLEVEL% neq 0 ( echo 启动失败 & pause & exit /b 1 )

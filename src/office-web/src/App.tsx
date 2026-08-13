@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import ChatPage from './pages/ChatPage';
 import SettingsPage from './pages/SettingsPage';
 import PreviewPage from './pages/PreviewPage';
 import { IconChat, IconEye, IconSettings, IconSun, IconMoon } from './components/Icons';
 import { useTheme } from './components/ThemeContext';
+import { previewClient } from './preview/PreviewClient';
+import { notifyTaskDone, notifyChatDone } from './lib/notify';
 
 type Tab = 'chat' | 'preview' | 'settings';
 
@@ -18,6 +20,28 @@ export default function App() {
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [iconKey, setIconKey] = useState(0);
   const { isDark, toggle } = useTheme();
+
+  // 全局任务完成通知：任意会话（含后台定时任务）结束时，若页面不在前台则弹浏览器系统通知。
+  useEffect(() => {
+    previewClient.start();
+    const off = previewClient.subscribeRunning((d) => {
+      if ((d.done || d.error) && !d.removed && d.task) {
+        // 仅当用户切到其它窗口（studentbuddy 不在前台）时弹，避免前台冗余打扰，也天然规避「主动停止」误通知。
+        if (typeof document !== 'undefined' && document.visibilityState === 'visible') return;
+        const failed = !!d.error;
+        const title = failed ? 'studentbuddy · 任务失败' : 'studentbuddy · 任务完成';
+        const body = d.task.title || (failed ? (d.error as string) : '任务已完成');
+        notifyTaskDone({ title, body });
+      }
+    });
+    // 对话回复完成通知：任意会话的 AI 回复成功结束时，若页面不在前台则弹浏览器系统通知。
+    // 与任务通知同策略（前台不打扰），由设置页「对话回复完成提醒」开关独立控制。
+    const offChat = previewClient.subscribeChatDone((d) => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') return;
+      notifyChatDone({ title: 'studentbuddy · 回复完成', body: 'AI 已回复完成，点击回到对话' });
+    });
+    return () => { off(); offChat(); };
+  }, []);
 
   const handleToggle = () => { setIconKey(k => k + 1); toggle(); };
 
@@ -48,7 +72,7 @@ export default function App() {
               <path d="M10 22v-4M14 22v-4" />
             </svg>
           </div>
-          <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)', letterSpacing: -0.3, transition: 'color 0.25s' }}>MiniClaw</span>
+          <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)', letterSpacing: -0.3, transition: 'color 0.25s' }}>studentbuddy</span>
         </div>
 
         {/* 标签页导航 */}
@@ -95,7 +119,7 @@ export default function App() {
         {/* ─── 页面内容（切 Tab 整页淡入上移过渡） ─── */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
         <div key={tab} className="page-enter" style={{ height: '100%' }}>
-          {tab === 'chat' ? <ChatPage onOpenPreview={openPreview} /> : tab === 'preview' ? <PreviewPage initialHtml={previewHtml} /> : <SettingsPage />}
+          {tab === 'chat' ? <ChatPage onOpenPreview={openPreview} /> : tab === 'preview' ? <PreviewPage initialHtml={previewHtml} /> : tab === 'quiz' ? <QuizBankPage /> : <SettingsPage />}
         </div>
       </div>
     </div>

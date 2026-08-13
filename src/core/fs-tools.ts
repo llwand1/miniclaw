@@ -1,5 +1,5 @@
 /**
- * fs-tools —— MiniClaw 工作区文件系统工具（沙箱）。
+ * fs-tools —— studentbuddy 工作区文件系统工具（沙箱）。
  *
  * 设计原则：
  * 1) 所有操作都限制在「配置的工作区根目录」内，resolveSafe 拦截一切越界（../、绝对路径逃逸）。
@@ -53,14 +53,14 @@ export function setWorkspaceRoot(p: string): string {
 
 /**
  * 首次启动时若未配置工作区，自动在用户主目录创建默认工作区并落库，
- * 省去手动设置步骤。默认路径：<用户主目录>/MiniClawWorkspace。
+ * 省去手动设置步骤。默认路径：<用户主目录>/studentbuddyWorkspace。
  * 用户仍可在「工作区」视图里随时改到自己的项目目录。
  */
 export function ensureDefaultWorkspace(): string {
   try {
     const row = getDb().prepare("SELECT value FROM app_settings WHERE key='workspace_root'").get() as any;
     if (row?.value?.trim()) return row.value.trim();
-    const def = path.join(os.homedir(), 'MiniClawWorkspace');
+    const def = path.join(os.homedir(), 'studentbuddyWorkspace');
     fs.mkdirSync(def, { recursive: true });
     getDb().prepare(
       "INSERT INTO app_settings (key,value) VALUES ('workspace_root',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')",
