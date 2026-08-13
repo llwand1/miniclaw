@@ -204,10 +204,7 @@ export default function ChatPage({ onOpenPreview }: { onOpenPreview?: (html: str
       const r = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
       if (!r.ok) return;
       refreshSessions();
-      setToast({
-        msg: '已隐藏对话',
-        onUndo: () => { fetch(`/api/sessions/${id}/restore`, { method: 'POST' }).then(refreshSessions).catch(() => {}); },
-      });
+      setToast({ msg: '已删除对话' });
     } catch { /* ignore */ }
   }
 
@@ -380,9 +377,6 @@ export default function ChatPage({ onOpenPreview }: { onOpenPreview?: (html: str
         <div style={{ position: 'fixed', left: '50%', bottom: 24, transform: 'translateX(-50%)', zIndex: 80 }}>
           <div className="mc-toast">
             <span>{toast.msg}</span>
-            {toast.onUndo && (
-              <button className="undo" onClick={() => { toast.onUndo?.(); setToast(null); }}>撤销</button>
-            )}
           </div>
         </div>
       )}
