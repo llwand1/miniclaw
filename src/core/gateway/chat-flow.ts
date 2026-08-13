@@ -54,7 +54,7 @@ export interface ChatFlowHost {
   pendingClarify: Map<string, PendingClarifyContext>;
   startRunning(sessionId: string, title: string, providerId: string, model: string): void;
   tickRunning(sessionId: string, phase: RunningTaskPhase, chars?: number): void;
-  finishRunning(sessionId: string, done: boolean, error?: string): void;
+  finishRunning(sessionId: string, done: boolean, error?: string, aborted?: boolean): void;
   generateOnce(provider: ProviderConfig, agent: AgentConfig, messages: ChatMessage[], temperature?: number, signal?: AbortSignal): Promise<{ text: string; promptTokens: number; completionTokens: number }>;
   publishArtifacts(sessionId: string, text: string): void;
   extractMemories(history: ChatMessage[], reply: string, source?: string): void;
@@ -345,9 +345,12 @@ export async function runChatFlow(host: ChatFlowHost, inbound: InboundMessage): 
   } catch (err: any) {
     if (err.message === '__ABORTED__' || controller.signal.aborted) {
       if (host.userAbortedSessions.has(sessionId)) {
-        // 用户主动停止：前端已知，静默收尾（只发 done 复位 busy），不报错
+        // 用户主动停止：广播「已停止」事件并标记 Trace 为已中止，让前端给出明确反馈
+        // （而非静默收尾），同时保留已产出的过程信息（步骤/清单/思考/部分回复）仍可见。
+        trace.setAborted();
+        host.emit('chat-stopped', { sessionId });
         host.emit('token', { sessionId, content: '', done: true });
-        host.finishRunning(sessionId, true);
+        host.finishRunning(sessionId, true, undefined, true);
       } else {
         // 服务端超时中止：必须明确报错，否则前端只收到空回复、用户完全不知道发生了什么
         const msg = '请求超时：服务端在 ' + Math.round(STREAM_TIMEOUT_MS / 1000) + ' 秒内未收到完整回复，已自动中止。可点重试，或换用响应更快的模型 / 关闭联网搜索。';

@@ -33,8 +33,8 @@ export function TraceWaterfall({ trace }: { trace: any }) {
           本次请求 Trace
           {live && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#34C759', display: 'inline-block', animation: 'mcDotPulse 1.2s infinite' }} title="进行中" />}
         </span>
-        <span style={{ fontSize: 11, color: trace.status === 'error' ? 'var(--mc-danger)' : 'var(--mc-muted)' }}>
-          {(total / 1000).toFixed(2)}s · {trace.spans.length} spans{live ? ' · 进行中' : ''}
+        <span style={{ fontSize: 11, color: trace.status === 'error' ? 'var(--mc-danger)' : trace.status === 'aborted' ? 'var(--mc-pin)' : 'var(--mc-muted)' }}>
+          {(total / 1000).toFixed(2)}s · {trace.spans.length} spans{live ? ' · 进行中' : (trace.status === 'aborted' ? ' · 已停止' : '')}
         </span>
       </div>
       <div style={{ fontFamily: 'ui-monospace,Menlo,Consolas,monospace', fontSize: 11.5 }}>
@@ -43,7 +43,7 @@ export function TraceWaterfall({ trace }: { trace: any }) {
           const start = (s.startedAt - t0) / total;
           const durMs = (s.endedAt ?? s.startedAt) - s.startedAt;
           const dur = Math.max(0.02, durMs / total);
-          const color = s.status === 'error' ? 'var(--mc-danger)' : (kindColor[s.kind] || '#8E8E93');
+          const color = s.status === 'error' ? 'var(--mc-danger)' : s.status === 'aborted' ? 'var(--mc-pin)' : (kindColor[s.kind] || '#8E8E93');
           const tok = (s.attrs && s.attrs.promptTokens != null) ? ` (${s.attrs.promptTokens}+${s.attrs.completionTokens} tok)` : '';
           const label = (s.attrs && s.attrs.model ? `${s.name} · ${s.attrs.model}` : s.name) + tok;
           const isOpen = open.has(s.spanId);
@@ -61,7 +61,7 @@ export function TraceWaterfall({ trace }: { trace: any }) {
               {isOpen && (
                 <div style={{ marginLeft: 14 * d + 162, marginRight: 16, marginBottom: 6, padding: '7px 10px', background: 'var(--mc-seg)', border: '1px solid var(--mc-hair)', borderRadius: 8, fontSize: 11, lineHeight: 1.5 }}>
                   <div style={{ color: 'var(--mc-text)', marginBottom: 4, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <span>状态：<b style={{ color: s.status === 'error' ? 'var(--mc-danger)' : 'var(--mc-accent)' }}>{s.status === 'error' ? '失败' : '成功'}</b></span>
+                    <span>状态：<b style={{ color: s.status === 'error' ? 'var(--mc-danger)' : s.status === 'aborted' ? 'var(--mc-pin)' : 'var(--mc-accent)' }}>{s.status === 'error' ? '失败' : s.status === 'aborted' ? '已停止' : '成功'}</b></span>
                     <span>耗时：<b>{durMs}ms</b>{s.endedAt == null ? '（进行中）' : ''}</span>
                     <span>类型：<b>{s.kind}</b></span>
                   </div>

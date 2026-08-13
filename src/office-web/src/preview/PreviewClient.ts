@@ -13,11 +13,12 @@ export interface RunningTaskFront {
   title: string;
   providerId: string;
   model: string;
-  phase: 'thinking' | 'searching' | 'fetching' | 'writing' | 'done' | 'error';
+  phase: 'thinking' | 'searching' | 'fetching' | 'writing' | 'done' | 'error' | 'aborted';
   startedAt: number;
   chars: number;
   done?: boolean;
   error?: string;
+  aborted?: boolean;
 }
 
 type Listener = (artifacts: Artifact[]) => void;

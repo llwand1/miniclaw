@@ -5,7 +5,7 @@ import { IconChat, IconCheck, IconContext, IconCross, IconFile, IconFileCode, Ic
 import { HistoryNavPanel } from './HistoryNavPanel';
 import { TodoList, ToolSteps } from './TaskComponents';
 import { AssistantBody } from './Markdown';
-import { ReasoningBlock, StageIndicator, StatusTextRotation, WaitingIndicator } from './StatusIndicators';
+import { ReasoningBlock, StageIndicator, StatusTextRotation, StoppedIndicator, WaitingIndicator } from './StatusIndicators';
 import { fmtMsgTime } from './chatUtils';
 import type { ChatPaneStore } from './useChatPane';
 
@@ -13,7 +13,7 @@ import type { ChatPaneStore } from './useChatPane';
 export function ChatView({ store }: { store: ChatPaneStore }) {
   const {
     msgs, msgMetaRef, navCollapsed, setNavCollapsed, historyScrollRef,
-    creatingSession, stalled, retryLast, busy, todos, steps, reasoning, stage, justDone,
+    creatingSession, stalled, retryLast, busy, todos, steps, reasoning, stage, justDone, stopped,
     isFirstOfSessionRef, thinkLevel, elapsed, handleActionResult, onOpenPreview,
     extractHtml, bottomRef, selectedSkills, setSelectedSkills, attachments, setAttachments,
     showModel, toggleModel, modelOptions, selectedModel, onSelectModel, setShowModel,
@@ -74,9 +74,10 @@ export function ChatView({ store }: { store: ChatPaneStore }) {
               {isAssistant && (
                 <>
                   {m.reasoning && m.reasoning.length > 0 && <ReasoningBlock text={m.reasoning} />}
-                  {isLast && todos.length > 0 && <TodoList todos={todos} doneCount={steps.filter((s: any) => s.status !== 'running').length} />}
+                  {isLast && todos.length > 0 && <TodoList todos={todos} doneCount={steps.filter((s: any) => s.status !== 'running').length} stopped={stopped} />}
                   {isLast && steps.length > 0 && <ToolSteps steps={steps} />}
-                  {isLast && (busy || justDone) && <StageIndicator stage={stage} hasTool={steps.length > 0} toolCount={steps.length} done={justDone} />}
+                  {isLast && stopped && <StoppedIndicator elapsed={elapsed} />}
+                  {isLast && (busy || justDone) && !stopped && <StageIndicator stage={stage} hasTool={steps.length > 0} toolCount={steps.length} done={justDone} />}
                   {isLast && busy && isFirstOfSessionRef.current && !m.content && !m.error && (
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--mc-muted)', margin: '2px 0 8px' }}>
                       <span className="mc-spin" style={{ width: 13, height: 13, borderRadius: '50%', border: '2px solid var(--mc-accent)', borderTopColor: 'transparent' }} />

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ReactNode } from 'react';
-import { IconCaret, IconChat, IconCheck, IconFiles, IconThink, IconTool } from './chatIcons';
+import { IconCaret, IconChat, IconCheck, IconFiles, IconStop, IconThink, IconTool } from './chatIcons';
 import { THINK_PHRASES } from './chatStyles';
 
 // ─── 阶段进度指示：思考中 → 调用工具 → 撰写回答 → 完成（实时推进，对标 WorkBuddy 阶段条 / OpenCode 状态栏）──
@@ -38,6 +38,24 @@ export function StageIndicator({ stage, hasTool, toolCount = 0, done = false }: 
           <IconCheck /> 完成
         </span>
       )}
+    </div>
+  );
+}
+
+// ─── 已停止指示：用户主动中止后展示明确的「已停止生成」反馈（替代静默收尾）──
+// 与 StageIndicator 互斥：停止时不显示绿色「完成」，而是琥珀色「已停止」，
+// 并提示本轮过程信息（步骤 / 任务 / 思考 / 部分回复）已保留在下方供查看。
+export function StoppedIndicator({ elapsed }: { elapsed?: number }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 2px 2px', marginBottom: 8, fontSize: 12, flexWrap: 'wrap', animation: 'mcRotIn .3s ease both' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--mc-pin)', fontWeight: 600 }}>
+        <IconStop />
+        已停止生成
+      </span>
+      {typeof elapsed === 'number' && (
+        <span style={{ color: 'var(--mc-muted2)' }}>· 用时 {elapsed}s</span>
+      )}
+      <span style={{ color: 'var(--mc-muted2)' }}>· 已保留本轮过程信息（步骤 / 任务 / 思考）</span>
     </div>
   );
 }

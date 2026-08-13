@@ -104,13 +104,13 @@ export default function ChatPage({ onOpenPreview }: { onOpenPreview?: (html: str
     for (const t of next) map.set(t.sessionId, { ...t });
     return [...map.values()].sort((a, b) => a.startedAt - b.startedAt);
   }
-  function onRunState(d: { sessionId: string; task?: RunningTaskFront; done?: boolean; error?: string; removed?: boolean }) {
+  function onRunState(d: { sessionId: string; task?: RunningTaskFront; done?: boolean; error?: string; removed?: boolean; aborted?: boolean }) {
     setRunningTasks(prev => {
       let next: RunningTaskFront[];
       if (d.removed || (d.done && !d.task)) {
         next = prev.filter(t => t.sessionId !== d.sessionId);
       } else if (d.task) {
-        next = mergeRunning(prev, [{ ...d.task, done: d.done, error: d.error }]);
+        next = mergeRunning(prev, [{ ...d.task, done: d.done, error: d.error, aborted: d.aborted }]);
       } else {
         next = prev;
       }
@@ -205,6 +205,14 @@ export default function ChatPage({ onOpenPreview }: { onOpenPreview?: (html: str
       if (!r.ok) return;
       refreshSessions();
       setToast({ msg: '已删除对话' });
+      // 若被删会话正打开在某个面板中：重置该面板为新对话状态，
+      // 避免「对话已删除但板块里还显示旧内容」的界面残留。
+      (['A', 'B'] as const).forEach(pid => {
+        if (paneInfo[pid].sessionId === id) {
+          setPaneInfo(p => ({ ...p, [pid]: { ...p[pid], sessionId: null } }));
+          setOpenReq({ pane: pid, sessionId: null, nonce: Date.now() });
+        }
+      });
     } catch { /* ignore */ }
   }
 

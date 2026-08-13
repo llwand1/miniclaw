@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { RunningTaskFront } from '../../preview/PreviewClient';
-import { IconCaret, IconChat, IconCheck, IconCross, IconFile, IconGlobe, IconSearch, IconThink, IconTool } from './chatIcons';
+import { IconCaret, IconChat, IconCheck, IconCross, IconFile, IconGlobe, IconSearch, IconStop, IconThink, IconTool } from './chatIcons';
 import { TEXT_FOLD_CHARS } from './chatStyles';
 
 // ─── 后台任务阶段标签 / 图标（底部任务栏 + 侧边栏徽章共用）─────────────────
@@ -11,6 +11,7 @@ export function taskPhaseInfo(p: string) {
     case 'writing': return { label: '撰写回答', icon: <IconChat />, color: 'var(--mc-accent)' };
     case 'done': return { label: '已完成', icon: <IconCheck />, color: '#34C759' };
     case 'error': return { label: '出错', icon: <IconCross />, color: 'var(--mc-danger)' };
+    case 'aborted': return { label: '已停止', icon: <IconStop />, color: 'var(--mc-pin)' };
     default: return { label: '思考中', icon: <IconThink />, color: 'var(--mc-accent)' };
   }
 }
@@ -26,7 +27,7 @@ export function TaskChip({ task, onClick }: { task: RunningTaskFront; onClick: (
   const info = taskPhaseInfo(task.phase);
   const secs = Math.max(0, Math.floor((Date.now() - task.startedAt) / 1000));
   const mm = Math.floor(secs / 60), ss = secs % 60;
-  const still = !task.done && task.phase !== 'error';
+  const still = !task.done && task.phase !== 'error' && task.phase !== 'aborted';
   return (
     <button onClick={onClick} title={`${task.title}\n${info.label} · ${mm}:${String(ss).padStart(2, '0')}`}
       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 12, border: '1px solid var(--mc-hair)', background: 'var(--mc-glass-strong)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', boxShadow: 'var(--mc-shadow-md)', cursor: 'pointer', color: 'var(--mc-text)', fontSize: 12.5, whiteSpace: 'nowrap', transition: 'transform .12s, background .12s' }}
@@ -45,7 +46,7 @@ export function TaskChip({ task, onClick }: { task: RunningTaskFront; onClick: (
 }
 
 // ─── 任务规划清单（WorkBuddy 式）：规划阶段 [TODO:...] 步骤，随工具步骤完成逐个打勾 ──
-export function TodoList({ todos, doneCount }: { todos: { id: string; content: string; status: 'pending' | 'running' | 'done' }[]; doneCount: number }) {
+export function TodoList({ todos, doneCount, stopped }: { todos: { id: string; content: string; status: 'pending' | 'running' | 'done' | 'stopped' }[]; doneCount: number; stopped?: boolean }) {
   if (!todos || todos.length === 0) return null;
   return (
     <div className="mc-scroll" style={{ border: '1px solid var(--mc-hair)', background: 'var(--mc-glass)', borderRadius: 12, padding: '8px 10px', margin: '0 0 10px', fontSize: 12.5, boxShadow: 'var(--mc-shadow-sm)' }}>
@@ -54,18 +55,20 @@ export function TodoList({ todos, doneCount }: { todos: { id: string; content: s
         <span style={{ marginLeft: 'auto', fontWeight: 400, color: 'var(--mc-muted2)' }}>{Math.min(doneCount, todos.length)}/{todos.length} 完成</span>
       </div>
       {todos.map((t, i) => {
-        const st = i < doneCount ? 'done' : i === doneCount ? 'running' : 'pending';
-        const color = st === 'done' ? '#34C759' : st === 'running' ? 'var(--mc-accent)' : 'var(--mc-muted2)';
+        const st: 'done' | 'running' | 'pending' | 'stopped' = i < doneCount ? 'done' : i === doneCount ? (stopped ? 'stopped' : 'running') : 'pending';
+        const color = st === 'done' ? '#34C759' : st === 'running' ? 'var(--mc-accent)' : st === 'stopped' ? 'var(--mc-pin)' : 'var(--mc-muted2)';
         return (
           <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 8 }}>
             <span style={{ color, display: 'inline-flex', flexShrink: 0, width: 16, justifyContent: 'center' }}>
               {st === 'done' ? <IconCheck /> : st === 'running' ? (
                 <span className="mc-spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid ' + color, borderTopColor: 'transparent' }} />
+              ) : st === 'stopped' ? (
+                <IconStop />
               ) : (
                 <span style={{ fontSize: 11, opacity: 0.6 }}>{i + 1}</span>
               )}
             </span>
-            <span style={{ flex: 1, color: st === 'pending' ? 'var(--mc-muted)' : 'var(--mc-text)', textDecoration: st === 'done' ? 'line-through' : 'none' }}>{t.content}</span>
+            <span style={{ flex: 1, color: st === 'pending' ? 'var(--mc-muted)' : 'var(--mc-text)', textDecoration: st === 'done' || st === 'stopped' ? 'line-through' : 'none' }}>{t.content}</span>
           </div>
         );
       })}
@@ -135,18 +138,19 @@ export function ToolSteps({ steps }: { steps: any[] }) {
       </div>
       {steps.map((s: any) => {
         const isOpen = open.has(s.stepId);
-        const accent = s.status === 'error' ? 'var(--mc-danger)' : s.status === 'done' ? '#34C759' : 'var(--mc-accent)';
+        const accent = s.status === 'error' ? 'var(--mc-danger)' : s.status === 'done' ? '#34C759' : s.status === 'stopped' ? 'var(--mc-pin)' : 'var(--mc-accent)';
         const dur = toolDuration(s);
         return (
           <div key={s.stepId}>
             <div onClick={() => toggle(s.stepId)}
-              className={s.status === 'done' ? 'mc-step-done' : ''}
+              className={s.status === 'done' || s.status === 'stopped' ? 'mc-step-done' : ''}
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 8, cursor: 'pointer', transition: 'background .15s' }}>
               <span style={{ color: accent, display: 'flex', flexShrink: 0 }}>{s.tool === 'fetch' ? <IconGlobe /> : s.tool === 'fs' ? <IconFile /> : <IconSearch />}</span>
               <span style={{ flex: 1, color: 'var(--mc-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</span>
               {dur && s.status !== 'running' && <span style={{ color: 'var(--mc-muted2)', fontVariantNumeric: 'tabular-nums', fontSize: 10.5, flexShrink: 0 }}>{dur}</span>}
               {s.status === 'running' && <span className="mc-spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid ' + accent, borderTopColor: 'transparent', flexShrink: 0 }} />}
               {s.status === 'done' && <span style={{ color: accent, display: 'flex', flexShrink: 0 }}><IconCheck /></span>}
+              {s.status === 'stopped' && <span style={{ color: accent, display: 'flex', flexShrink: 0 }}><IconStop /></span>}
               {s.status === 'error' && <span style={{ color: accent, display: 'flex', flexShrink: 0 }}><IconCross /></span>}
               <span style={{ color: 'var(--mc-muted2)', transform: isOpen ? 'rotate(-90deg)' : 'none', transition: 'transform .15s', display: 'flex', flexShrink: 0 }}><IconCaret /></span>
             </div>

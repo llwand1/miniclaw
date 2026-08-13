@@ -87,9 +87,9 @@ export class Gateway extends EventEmitter implements ChatFlowHost {
     this.runState.tick(sessionId, phase, chars);
   }
 
-  /** 结束任务：广播 done/error 后移除（done 保留 8s 供任务栏展示"已完成"，error 保留 60s+供点掉） */
-  finishRunning(sessionId: string, done: boolean, error?: string): void {
-    this.runState.finish(sessionId, done, error);
+  /** 结束任务：广播 done/error/aborted 后移除（done/aborted 保留 8s，error 保留 60s+供点掉） */
+  finishRunning(sessionId: string, done: boolean, error?: string, aborted?: boolean): void {
+    this.runState.finish(sessionId, done, error, aborted);
   }
 
   /** 当前全部进行中任务快照（供前端刷新/重连时对齐） */

@@ -4,8 +4,8 @@
  */
 import { EventEmitter } from 'node:events';
 
-/** 后台任务阶段：思考中 → 联网搜索 / 抓取页面 / 文件工具 → 撰写回答 → 完成/出错 */
-export type RunningTaskPhase = 'thinking' | 'searching' | 'fetching' | 'writing' | 'done' | 'error';
+/** 后台任务阶段：思考中 → 联网搜索 / 抓取页面 / 文件工具 → 撰写回答 → 完成/出错/已停止 */
+export type RunningTaskPhase = 'thinking' | 'searching' | 'fetching' | 'writing' | 'done' | 'error' | 'aborted';
 
 /** 单个后台任务（sessionId -> 进行中任务，前端任务栏实时刷新） */
 export interface RunningTask {
@@ -43,15 +43,15 @@ export class RunStateTracker {
     this.emitRunState(sessionId);
   }
 
-  /** 结束任务：广播 done/error 后移除（done 保留 8s 供任务栏展示"已完成"，error 保留 60s+供点掉） */
-  finish(sessionId: string, done: boolean, error?: string): void {
+  /** 结束任务：广播 done/error/aborted 后移除（done/aborted 保留 8s，error 保留 60s+供点掉） */
+  finish(sessionId: string, done: boolean, error?: string, aborted?: boolean): void {
     const t = this.runningTasks.get(sessionId);
     if (!t) return;
-    t.phase = done ? 'done' : 'error';
-    const data: any = { sessionId, task: { ...t }, done };
+    t.phase = aborted ? 'aborted' : done ? 'done' : 'error';
+    const data: any = { sessionId, task: { ...t }, done: done || !!aborted, aborted: !!aborted };
     if (error) data.error = error;
     this.emitter.emit('run-state', data);
-    setTimeout(() => this.remove(sessionId), done ? 8000 : 60_000);
+    setTimeout(() => this.remove(sessionId), aborted ? 8000 : done ? 8000 : 60_000);
   }
 
   remove(sessionId: string): void {

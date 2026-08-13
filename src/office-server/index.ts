@@ -18,6 +18,15 @@ export function createServer(gateway: Gateway, webPath?: string): http.Server {
   app.use(cors({ origin: corsWhitelist, credentials: false }));
   app.use(express.json({ limit: '2mb' })); // 安全：限制请求体大小，防大 payload DoS
 
+  // 安全：基础响应头（去掉框架指纹 + nosniff + 禁止被 iframe 嵌入）
+  app.disable('x-powered-by');
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    next();
+  });
+
   if (webPath) {
     app.use(express.static(webPath));
   }
@@ -95,6 +104,12 @@ export function createServer(gateway: Gateway, webPath?: string): http.Server {
     broadcast({ type: 'chat-error', ...data });
     // 该轮异常结束：延迟清缓冲，避免重连回放旧轮错误污染下一轮（容让「刚失败时连上」的客户端）。
     setTimeout(() => { tokenBuffer.delete(sid); bufferSeen.delete(sid); }, 2000);
+  });
+  // 用户主动停止：广播给对应会话，前端据此给出「已停止」反馈（而非静默收尾），
+  // 并保留已产出的过程信息（步骤/清单/思考/部分回复）可见。
+  gateway.on('chat-stopped', (data: any) => {
+    pushBuffer(data.sessionId, { type: 'chat-stopped', ...data });
+    broadcast({ type: 'chat-stopped', ...data });
   });
   // 简易 Trace：实时增量（start/span）走缓冲+广播（兼容「新会话先发后连」竞态），
   // 最终完整 payload 仅广播（校准用，丢包不影响已收增量）。

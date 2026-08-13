@@ -15,7 +15,7 @@ export interface SpanData {
   kind: SpanKind;
   startedAt: number;
   endedAt: number | null;
-  status: 'ok' | 'error';
+  status: 'ok' | 'error' | 'aborted';
   attrs: Record<string, any>;
 }
 
@@ -25,7 +25,7 @@ export interface TracePayload {
   rootName: string;
   startedAt: number;
   endedAt: number | null;
-  status: 'ok' | 'error';
+  status: 'ok' | 'error' | 'aborted';
   spans: SpanData[];
 }
 
@@ -34,7 +34,7 @@ class Span {
   public spanId = randomUUID();
   public startedAt = Date.now();
   public endedAt: number | null = null;
-  public status: 'ok' | 'error' = 'ok';
+  public status: 'ok' | 'error' | 'aborted' = 'ok';
   public attrs: Record<string, any>;
 
   constructor(
@@ -80,7 +80,7 @@ class Trace extends EventEmitter {
   public traceId = randomUUID();
   public startedAt = Date.now();
   public endedAt: number | null = null;
-  public status: 'ok' | 'error' = 'ok';
+  public status: 'ok' | 'error' | 'aborted' = 'ok';
   public spans: Span[] = [];
   private root: Span;
   private current: Span | null = null;
@@ -118,6 +118,12 @@ class Trace extends EventEmitter {
   setError(msg?: string): void {
     this.status = 'error';
     this.root.setError(msg);
+  }
+
+  /** 用户主动停止：Trace 标记为「已中止」（区别于出错），瀑布面据此显示「已停止」。 */
+  setAborted(): void {
+    this.status = 'aborted';
+    this.root.status = 'aborted';
   }
 
   end(attrs?: Record<string, any>): void {

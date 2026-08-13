@@ -38,7 +38,7 @@ export interface ChatPaneStore {
   showTrace: boolean;
   trace: any;
   steps: any[];
-  todos: { id: string; content: string; status: 'pending' | 'running' | 'done' }[];
+  todos: { id: string; content: string; status: 'pending' | 'running' | 'done' | 'stopped' }[];
   reasoning: string;
   navCollapsed: boolean;
   traceUserClosedRef: React.MutableRefObject<boolean>;
@@ -55,6 +55,7 @@ export interface ChatPaneStore {
   ctxColor: string;
   stage: 'thinking' | 'tooling' | 'writing';
   justDone: boolean;
+  stopped: boolean;
   active: Artifact | null;
   activeChange: any;
   activeDiff: { t: 'ctx' | 'del' | 'add'; s: string }[] | null;
@@ -114,6 +115,10 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
   // 本轮刚结束的短暂窗口（done 后约 1.4s）：让阶段条/完成态优雅收尾，避免 busy 突变为 false 时阶段条 abrupt 消失
   const [justDone, setJustDone] = useState(false);
   const justDoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 本轮是否被用户主动停止（用于区分「正常完成」与「停止」：停止时步骤/任务/思考保留可见，
+  // 不再误标为完成，也不进入绿色「完成」收尾窗口）
+  const [stopped, setStopped] = useState(false);
+  const stoppedRef = useRef(false);
   const [thinkLevel, setThinkLevel] = useState(() => {
     const saved = localStorage.getItem('thinkLevel');
     return saved !== null ? Math.max(0, Math.min(4, parseInt(saved, 10))) : 2;
@@ -302,6 +307,27 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
           setStalled(false);
           return;
         }
+        // 用户主动停止：给出明确「已停止」反馈，并保留已产出的过程信息（步骤/清单/思考/部分回复）
+        if (d.type === 'chat-stopped') {
+          stoppedRef.current = true;
+          // 运行中的步骤/任务标记为「已停止」（保留可见，不再误标为完成）
+          setSteps(prev => prev.map((s: any) => s.status === 'running' ? { ...s, status: 'stopped', endedAt: Date.now() } : s));
+          setTodos(prev => prev.map((t: any) => t.status === 'running' ? { ...t, status: 'stopped' } : t));
+          setStopped(true);
+          setBusy(false);
+          setStalled(false);
+          setJustDone(false);
+          // 末条 assistant 仍为空（尚未产出内容）→ 明确标记「已停止生成」，避免空白气泡无提示
+          setMsgs(prev => {
+            const c = prev.slice();
+            const last = c[c.length - 1];
+            if (last && last.role === 'assistant' && !last.content && !last.error) {
+              c[c.length - 1] = { ...last, content: '（已停止生成）' };
+            }
+            return c;
+          });
+          return;
+        }
         // token：即使 done 也先拼接内容，避免丢最后一包
         if (d.content) {
           isFirstOfSessionRef.current = false; // 收到首个正文片段，首条创建态结束
@@ -314,8 +340,13 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
           });
         }
         if (d.done) {
-          // 兜底：把仍在「进行中」的步骤标记为完成（防御后端未发终态）
-          setSteps(prev => prev.map((s: any) => s.status === 'running' ? { ...s, status: 'done', endedAt: Date.now() } : s));
+          if (stoppedRef.current) {
+            // 被用户停止：运行中的步骤保持「已停止」，不误标为完成，也不进入绿色「完成」收尾窗口
+            setSteps(prev => prev.map((s: any) => s.status === 'running' ? { ...s, status: 'stopped', endedAt: Date.now() } : s));
+          } else {
+            // 正常完成：把仍在「进行中」的步骤标记为完成（防御后端未发终态）
+            setSteps(prev => prev.map((s: any) => s.status === 'running' ? { ...s, status: 'done', endedAt: Date.now() } : s));
+          }
           // 后端在 done 事件里带回实际生成该回复的模型与 token 数，回填到最后一条 assistant 消息
           if (d.model || d.tokens != null) {
             setMsgs(prev => {
@@ -326,10 +357,12 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
             });
           }
           setBusy(false); setConn('open'); setStalled(false);
-          // 进入「刚结束」短暂窗口：阶段条显示完成态后优雅淡出（避免 abrupt 消失）
-          setJustDone(true);
-          if (justDoneTimerRef.current) clearTimeout(justDoneTimerRef.current);
-          justDoneTimerRef.current = setTimeout(() => setJustDone(false), 1400);
+          // 仅正常完成才进入「刚结束」优雅收尾窗口；停止则不显示绿色「完成」
+          if (!stoppedRef.current) {
+            setJustDone(true);
+            if (justDoneTimerRef.current) clearTimeout(justDoneTimerRef.current);
+            justDoneTimerRef.current = setTimeout(() => setJustDone(false), 1400);
+          }
           // 本轮结束：刷新服务端真实上下文用量（新消息已落库，进度条随之更新）
           if (sid) {
             fetch(`/api/sessions/${sid}/context`).then(r => r.json()).then((c: any) => {
@@ -382,6 +415,8 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
     setReasoning('');
     setTrace(null);
     setShowTrace(false);
+    setStopped(false);
+    stoppedRef.current = false;
     // 选中产物收敛到「当前会话」的第一个（与 previewClient.subscribe 的收敛逻辑一致）
     setActiveArtifact((prev) => {
       const cur = sid;
@@ -474,6 +509,8 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
     }
     setBusy(true);
     setJustDone(false);
+    setStopped(false);
+    stoppedRef.current = false;
     setSteps([]);
     setReasoning('');
     // 新会话：客户端先生成 sessionId 并写入本地 sid，使本 Pane 的 SSE（按 sessionId
@@ -547,7 +584,8 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
     try {
       await fetch('/api/chat/abort', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: sid }) });
     } catch { /* ignore */ }
-    // 若末条 assistant 仍为空（尚未产出内容），明确标记「已停止」，避免空白气泡无提示
+    // 即时兜底反馈：SSE 到达后由 chat-stopped 事件统一收尾（标记步骤为已停止、保留过程信息）。
+    // 若末条 assistant 仍为空（尚未产出内容），先明确标记「已停止生成」，避免空白气泡无提示。
     setMsgs(prev => {
       const c = prev.slice();
       const last = c[c.length - 1];
@@ -682,7 +720,7 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
     showAttach, attachments, fileInputRef, elapsed, artifacts, activeArtifact,
     wsTab, activeChangeId, fileChanges,
     // 连接 / 任务
-    conn, stalled, creatingSession, showTrace, trace, steps, todos, reasoning, justDone,
+    conn, stalled, creatingSession, showTrace, trace, steps, todos, reasoning, justDone, stopped,
     navCollapsed, traceUserClosedRef, isFirstOfSessionRef, bottomRef, historyScrollRef, msgMetaRef,
     // 派生值
     paneArtifacts, paneChanges, sessionTitle, ctx, ctxPct, ctxColor, stage,
