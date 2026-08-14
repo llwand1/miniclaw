@@ -5,6 +5,10 @@ release/
 .DS_Store
 Thumbs.db
 
+# Python 缓存
+__pycache__/
+*.pyc
+
 # 用户数据目录
 appdata/
 

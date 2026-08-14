@@ -1,0 +1,8 @@
+# studentbuddy 联网强化 Python 服务 — 核心依赖
+# 安装：python -m pip install -r requirements.txt
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# ---- 可选增强（不装也能跑，会自动降级）----
+# trafilatura>=1.6.0        # 高质量正文提取（比纯正则强很多，推荐装）
+# playwright>=1.40.0        # JS 渲染抓取；装完还需执行: python -m playwright install chromium
