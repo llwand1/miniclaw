@@ -306,7 +306,8 @@ export function SecurityTab() {
         </div>
         <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 8 }}>
           API Key、OAuth Token、App Secret 等敏感凭证已使用 AES-256-GCM 加密存储。
-          主密钥由 Windows DPAPI 派生，与本机用户绑定——数据库被拷走也无法解密。
+          主密钥由 Windows DPAPI 保护并绑定当前 Windows 用户——即使数据库与密钥文件一并被拷走，
+          到另一台机器/另一用户也无法解密（非 Windows 平台退化为本地密钥文件隔离存储）。
         </div>
         <div style={{ display: 'flex', gap: 12, fontSize: 12 }}>
           <div>

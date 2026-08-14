@@ -68,5 +68,6 @@ export const corsWhitelist = (origin: string | undefined, callback: (err: Error 
   // 允许同源（无 Origin，如服务端到服务端）
   if (!origin) return callback(null, true);
   if (isAllowedOrigin(origin)) return callback(null, true);
-  return callback(new Error(`Not allowed by CORS: ${origin}`), false);
+  // 不抛错（抛错会让 Express 走 500），而是显式拒绝 → 由后续 originCheck 返回 403
+  return callback(null, false);
 };
