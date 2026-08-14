@@ -1,5 +1,6 @@
 import { SearchResult, SearchResponse, FetchedPage, SearchConfig } from './types';
 import { createLogger } from '../logger';
+import { pythonSearchBridge } from './python-bridge';
 
 export type { SearchConfig };
 
@@ -91,6 +92,14 @@ async function duckduckgoLiteSearch(query: string): Promise<SearchResponse> {
 }
 
 export async function searchWeb(query: string, config?: SearchConfig): Promise<SearchResponse> {
+  // 优先走 Python 强化服务（Bing/百度/DDG 多源并发 + 代理 + 重试），失败自动降级原实现
+  try {
+    const py = await pythonSearchBridge.search(query);
+    if (py.results.length > 0) return py;
+    log.warn('py-search 返回空结果，降级 Node 直连');
+  } catch (err: any) {
+    log.warn({ error: err.message }, 'py-search search 失败，降级 Node 直连');
+  }
   const errors: string[] = [];
   try {
     return await duckduckgoSearch(query);
@@ -127,6 +136,14 @@ export async function searchWeb(query: string, config?: SearchConfig): Promise<S
 
 export async function fetchPage(url: string): Promise<FetchedPage> {
   log.info({ url }, 'Fetch page');
+  // 优先走 Python 强化服务（JS 渲染 + trafilatura 正文提取），失败降级原实现
+  try {
+    const py = await pythonSearchBridge.fetch(url);
+    if (py.text && py.text.trim().length > 0) return py;
+    log.warn('py-search fetch 返回空正文，降级 Node 直连');
+  } catch (err: any) {
+    log.warn({ error: err.message }, 'py-search fetch 失败，降级 Node 直连');
+  }
   const res = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) studentbuddy/0.1.0' },
     signal: AbortSignal.timeout(10000),
