@@ -15,17 +15,17 @@ import { decryptSecret, isEncrypted } from '../security/crypto';
 describe('gateway/db', () => {
   afterAll(() => { closeDb(); });
 
-  it('DBS-01 建表:22 张正式表(21 migrate + approval_queue,排除 sqlite_* 系统表)', () => {
+  it('DBS-01 建表:21 张正式表(20 migrate + approval_queue,排除 sqlite_* 系统表)', () => {
     const rows = getDb().prepare(`
       SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name
     `).all() as any[];
     const names = rows.map(r => r.name);
-    // 22 张业务表(21 张 migrate + ensureApprovalTable 建的 approval_queue)
-    expect(names.length).toBe(22);
+    // 21 张业务表(20 张 migrate + ensureApprovalTable 建的 approval_queue)
+    expect(names.length).toBe(21);
     for (const t of ['providers', 'agents', 'sessions', 'messages', 'skills', 'cron_jobs',
       'scheduled_tasks', 'token_usage', 'files', 'window_state', 'memories', 'search_config',
       'github_oauth_config', 'users', 'github_tokens', 'wechat_oauth_config', 'wechat_tokens',
-      'app_settings', 'session_shares', 'traces', 'spans', 'approval_queue']) {
+      'app_settings', 'quiz_bank', 'session_shares', 'approval_queue']) {
       expect(names).toContain(t);
     }
   });
@@ -40,7 +40,7 @@ describe('gateway/db', () => {
     const db = getDb();
     const sc = db.prepare('SELECT * FROM search_config WHERE id=1').get() as any;
     expect(sc).toBeTruthy();
-    expect(sc.enabled).toBe(0);
+    expect(sc.enabled).toBe(1);
     expect(sc.provider).toBe('duckduckgo');
     const gh = db.prepare('SELECT * FROM github_oauth_config WHERE id=1').get() as any;
     expect(gh).toBeTruthy();

@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 // vi.hoisted 保证在静态 import 之前设置 DATA_DIR(避免连到真实库)
 vi.hoisted(() => {
@@ -44,5 +48,47 @@ describe('security/crypto', () => {
 
   it('伪造/损坏密文解密返回空串不抛错', () => {
     expect(decryptSecret('enc:v1:!!!bad-base64!!!')).toBe('');
+  });
+
+  it('SEC-09 Windows 上 .mk 是 DPAPI 包装的 blob,而非明文主密钥', () => {
+    const blob = fs.readFileSync(path.join(process.env.DATA_DIR!, '.mk'));
+    if (process.platform === 'win32') {
+      // DPAPI blob 含版本头/salt,长度远大于 32;若等于 32 说明仍是旧版明文 stub 落盘
+      expect(blob.length).not.toBe(32);
+    }
+  });
+
+  it('SEC-08 旧版明文主密钥自动迁移为 DPAPI,既有密文不丢', async () => {
+    const TMP2 = fs.mkdtempSync(path.join(os.tmpdir(), 'studentbuddy-test-crypto-mig-'));
+    // 模拟旧版 stub:预置 32 字节明文主密钥,并用它加密一条「存量密文」
+    const legacyKey = Buffer.from('L'.repeat(32));
+    fs.writeFileSync(path.join(TMP2, '.mk'), legacyKey);
+    const iv = crypto.randomBytes(12);
+    const c = crypto.createCipheriv('aes-256-gcm', legacyKey, iv);
+    const ct = Buffer.concat([c.update('存量密钥-迁移前', 'utf8'), c.final()]);
+    const legacyCipher = 'enc:v1:' + Buffer.concat([iv, c.getAuthTag(), ct]).toString('base64');
+
+    // 用全新的模块实例 + 新 DATA_DIR 模拟一次独立启动
+    vi.resetModules();
+    process.env.DATA_DIR = TMP2;
+    const m = await import('./crypto');
+    m.initCrypto();
+
+    // 迁移复用了旧密钥(而非生成新钥):既有密文仍可解
+    expect(m.decryptSecret(legacyCipher)).toBe('存量密钥-迁移前');
+    // 迁移后加解密正常
+    const enc = m.encryptSecret('post-migration');
+    expect(m.decryptSecret(enc)).toBe('post-migration');
+    // Windows 上 .mk 已被重写为 DPAPI blob(不再是 32 字节明文)
+    const blob = fs.readFileSync(path.join(TMP2, '.mk'));
+    if (process.platform === 'win32') expect(blob.length).not.toBe(32);
+
+    // 模拟再重启一次:从 DPAPI blob 解回旧密钥,既有密文仍可解(真实 DPAPI 往返)
+    vi.resetModules();
+    const m2 = await import('./crypto');
+    m2.initCrypto();
+    expect(m2.decryptSecret(legacyCipher)).toBe('存量密钥-迁移前');
+
+    process.env.DATA_DIR = os.tmpdir();
   });
 });

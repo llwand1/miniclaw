@@ -97,11 +97,11 @@ describe('gateway/integration', () => {
     gw.on('token', (e: any) => tokens.push(e));
 
     // 规划阶段返回 [SEARCH:xxx],最终阶段返回回答。
-    // 注意:工具启用时 handleMessage 会先跑一次原生 tool loop 探测(本轮无 tool_calls → 交还原路径),
-    // 因此 engine.chat 的调用序列是:探测(无工具)→ 规划(含 [SEARCH:])→ 最终(回答)。
+    // 注意:工具启用时 handleMessage 会先跑一次原生 tool 探测;探测文本直接复用为规划结果
+    // (模型未走原生工具时不再重复调用 generateOnce),因此 engine.chat 调用序列是:
+    // 探测(文本含 [SEARCH:],直接当规划用)→ 最终(回答)。
     (gw as any).engine = fakeEngine([
-      [{ content: 'ok', done: true }], // 原生探测:无 tool_calls
-      [{ content: '我需要搜索\n[SEARCH:测试关键词]', done: true }], // 规划
+      [{ content: '我需要搜索\n[SEARCH:测试关键词]', done: true }], // 探测即规划(复用,不重复调用)
       [
         { content: '根据搜索结果', done: false },
         { content: '回答如下', done: true },
@@ -222,7 +222,9 @@ describe('gateway/integration', () => {
     db.prepare('UPDATE search_config SET enabled=1 WHERE id=1').run();
 
     const steps: any[] = [];
+    const tokens: any[] = [];
     gw.on('step', (e: any) => steps.push(e));
+    gw.on('token', (e: any) => tokens.push(e));
 
     // 第一轮:返回 search_web 工具调用;第二轮:返回最终回答
     (gw as any).engine = fakeEngine([
@@ -246,6 +248,11 @@ describe('gateway/integration', () => {
     expect(steps[0].step.tool).toBe('search');
     expect(steps[0].step.status).toBe('running');
 
+    // 最终回答以 token 事件流式下发(工具路径也应像文本路径一样有打字机效果)
+    const streamed = tokens.filter((t: any) => t.content).map((t: any) => t.content).join('');
+    expect(streamed).toContain('基于搜索结果');
+    expect(tokens.some((t: any) => t.done === true)).toBe(true);
+
     // 最终回答落库
     const msgs = db.prepare("SELECT content FROM messages WHERE session_id=? AND role='assistant'").all(sid) as any[];
     expect(msgs.some((m: any) => m.content.includes('基于搜索结果'))).toBe(true);
@@ -253,13 +260,13 @@ describe('gateway/integration', () => {
     db.prepare('UPDATE search_config SET enabled=0 WHERE id=1').run();
   });
 
-  it('GWY-13 原生 tool loop:模型未走原生工具(文本标记/直接回答)时交还原路径', async () => {
+  it('GWY-13 原生 tool loop:模型未走原生工具(文本标记/直接回答)时复用探测文本作规划', async () => {
     const gw = new Gateway();
     await gw.start();
     const db = getDb();
     db.prepare('UPDATE search_config SET enabled=1 WHERE id=1').run();
 
-    // 第一轮:直接回答(无 tool_calls),应交还文本标记路径 → 直接流式输出该文本
+    // 第一轮:直接回答(无 tool_calls)。探测文本被复用为规划结果,无标记 → 直接流式输出该文本
     (gw as any).engine = fakeEngine([
       [
         { content: '直接回答内容', done: false },
@@ -277,6 +284,55 @@ describe('gateway/integration', () => {
     // 回答已落库
     const msgs = db.prepare("SELECT content FROM messages WHERE session_id=? AND role='assistant'").all(sid) as any[];
     expect(msgs.some((m: any) => m.content.includes('直接回答内容'))).toBe(true);
+
+    db.prepare('UPDATE search_config SET enabled=0 WHERE id=1').run();
+  });
+
+  it('GWY-14 原生工具轮落库:assistant tool_calls + tool 结果持久化,追问时回放给模型', async () => {
+    const gw = new Gateway();
+    await gw.start();
+    const db = getDb();
+    db.prepare('UPDATE search_config SET enabled=1 WHERE id=1').run();
+    vi.mocked(searcherMod.performSearches).mockResolvedValue('模拟搜索结果文本');
+
+    // 第一轮:返回 search_web 工具调用;第二轮:返回最终回答
+    (gw as any).engine = fakeEngine([
+      [
+        { content: '', done: true, finishReason: 'tool_calls', toolCalls: [{ id: 'call_1', name: 'search_web', arguments: '{"queries":["天气"]}' }] },
+      ],
+      [{ content: '今日晴 25°C', done: true }],
+    ]);
+    const sid = await gw.handleMessage({ text: '查天气', source: 'main' });
+
+    // 工具调用消息已原子落库且顺序正确:user → assistant(tool_calls) → tool(结果) → assistant(最终)
+    const rows = db.prepare("SELECT role,content,tool_call_id,tool_calls FROM messages WHERE session_id=? ORDER BY ts, id").all(sid) as any[];
+    expect(rows.map((r: any) => r.role)).toEqual(['user', 'assistant', 'tool', 'assistant']);
+    // assistant 消息携带 tool_calls JSON(与驼峰字段一致)
+    expect(JSON.parse(rows[1].tool_calls)).toEqual([
+      { id: 'call_1', name: 'search_web', arguments: '{"queries":["天气"]}' },
+    ]);
+    // tool 消息带有对应的 tool_call_id 和工具结果
+    expect(rows[2].tool_call_id).toBe('call_1');
+    expect(rows[2].content).toContain('模拟搜索结果文本');
+    expect(rows[3].content).toBe('今日晴 25°C');
+
+    // 追问:捕获第一次传给 engine.chat 的消息(探测调用 = 完整历史回放)。
+    // 注意不能用最后的 seenMessages——探测之后 extractMemories→summarizeMemories 还会
+    // 再调一次 engine.chat(其入参经 history.slice(-4) 裁剪),会覆盖掉探测入参。
+    let seenMessages: any[] | null = null;
+    const capture = { chat: vi.fn() };
+    capture.chat.mockImplementation(async function* (_p: unknown, _a: unknown, messages: any[]) {
+      if (seenMessages === null) seenMessages = messages;
+      yield { content: '基于历史工具结果', done: true };
+    });
+    (gw as any).engine = capture;
+    await gw.handleMessage({ text: '再说明一下', sessionId: sid, source: 'main' });
+
+    const toolMsg = seenMessages!.find((m: any) => m.role === 'tool');
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg.toolCallId).toBe('call_1');
+    expect(toolMsg.content).toContain('模拟搜索结果文本');
+    expect(seenMessages!.some((m: any) => m.role === 'assistant' && m.toolCalls?.length > 0)).toBe(true);
 
     db.prepare('UPDATE search_config SET enabled=0 WHERE id=1').run();
   });
