@@ -2,6 +2,7 @@ import { Gateway } from '../src/core/gateway';
 import { createServer } from '../src/office-server';
 import { createLogger } from '../src/core/logger';
 import { previewService } from '../src/core/preview';
+import { pythonSearchBridge } from '../src/core/search/python-bridge';
 import path from 'node:path';
 
 const log = createLogger('server');
@@ -20,7 +21,28 @@ async function main() {
   });
 
   const webPath = path.resolve(__dirname, '..', 'dist', 'web');
-  createServer(gateway, webPath);
+  const server = createServer(gateway, webPath);
+
+  // graceful shutdown：Ctrl+C / kill 时按序关闭 HTTP server → gateway → python 搜索子进程，
+  // 避免残留占用端口与子进程。
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log.info(`收到 ${signal}，正在关闭…`);
+    try {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await gateway.stop();
+      pythonSearchBridge.stop();
+      log.info('已安全退出');
+      process.exit(0);
+    } catch (err: any) {
+      log.error({ error: err.message }, 'shutdown 失败，强制退出');
+      process.exit(1);
+    }
+  };
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
   log.info(`Server ready at http://127.0.0.1:${PORT}`);
 }

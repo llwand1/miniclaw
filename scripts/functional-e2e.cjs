@@ -66,8 +66,12 @@ async function main() {
   fs.rmSync(DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(DATA_DIR, { recursive: true });
 
+  // child / mockLlm 在 finally 中统一清理:任何 return / 异常路径都不泄漏子进程与端口
+  let child = null;
+  let mockLlm = null;
+  try {
   const tsxCli = path.resolve(__dirname, '..', 'node_modules', 'tsx', 'dist', 'cli.mjs');
-  const child = spawn(process.execPath, [tsxCli, 'scripts/dev-server.ts'], {
+  child = spawn(process.execPath, [tsxCli, 'scripts/dev-server.ts'], {
     cwd: path.resolve(__dirname, '..'),
     env: { ...process.env, DATA_DIR, PORT: String(PORT) },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -81,8 +85,8 @@ async function main() {
     await sleep(500);
     try { const r = await fetch(`${BASE}/api/status`); if (r.ok) { ready = true; break; } } catch { /* retry */ }
   }
-  if (!ready) { console.log('SERVER NOT READY'); console.log(log.slice(-3000)); child.kill(); process.exit(1); }
-  const mockLlm = await startMockLlm(); // 本地 mock LLM,供 chat 全链路
+  if (!ready) { console.log('SERVER NOT READY'); console.log(log.slice(-3000)); return 1; }
+  mockLlm = await startMockLlm(); // 本地 mock LLM,供 chat 全链路
   console.log(`\n[1/8] 基础状态与种子`);
   {
     const s = await get('/api/status');
@@ -248,19 +252,22 @@ async function main() {
     ok('GET /api/traces → 可解析(可能为空)', traces.status === 200, `status=${traces.status}`);
   }
 
-  child.kill();
-  mockLlm.close();
   console.log(`\n══════════════════════════════`);
   console.log(`  通过 ${pass} / ${pass + fail}`);
   if (fail > 0) {
     console.log('  失败项:');
     for (const f of failures) console.log('    ✗ ' + f);
     console.log('══════════════════════════════');
-    process.exit(1);
+    return 1;
   }
   console.log('  全功能大测试 ✅ PASS');
   console.log('══════════════════════════════');
-  process.exit(0);
+  return 0;
+  } finally {
+    // 任何路径(成功/失败/异常)都清理子进程与 mock LLM,避免端口泄漏
+    if (child) { try { child.kill(); } catch { /* ignore */ } }
+    if (mockLlm) { try { mockLlm.close(); } catch { /* ignore */ } }
+  }
 }
 
-main().catch(e => { console.error('E2E FAILED:', e); process.exit(1); });
+main().then(code => process.exit(code)).catch(e => { console.error('E2E FAILED:', e); process.exit(1); });

@@ -26,6 +26,30 @@ const MAX_GREP_MATCHES = 80;
 const SKIP_DIRS = new Set(['node_modules', '.git']);
 
 // ─── 配置读写 ────────────────────────────────────────────────
+
+// 系统关键目录:拒绝设为工作区根(避免 AI 文件工具触及系统区域)。
+// 按平台选取;统一小写化 + 正斜杠规范化后比对(Windows 大小写不敏感,POSIX 目录名本身为小写)。
+const BLOCKED_WORKSPACE_ROOTS: string[] = process.platform === 'win32'
+  ? [
+      'c:/windows',
+      'c:/program files',
+      'c:/program files (x86)',
+      'c:/programdata',
+      'c:/recovery',
+      'c:/system volume information',
+      'c:/$recycle.bin',
+    ]
+  : ['/usr', '/etc', '/bin', '/sbin', '/lib', '/var', '/root', '/dev', '/proc', '/sys'];
+
+/** 判断绝对路径是否为被拒的系统目录或其子目录。 */
+function isBlockedWorkspaceRoot(abs: string): boolean {
+  const norm = abs.replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
+  return BLOCKED_WORKSPACE_ROOTS.some((b) => {
+    const bn = b.replace(/\/+$/, '');
+    return norm === bn || norm.startsWith(bn + '/');
+  });
+}
+
 export function getWorkspaceRoot(): string | null {
   try {
     const row = getDb().prepare("SELECT value FROM app_settings WHERE key='workspace_root'").get() as any;
@@ -44,6 +68,12 @@ export function setWorkspaceRoot(p: string): string {
   const abs = path.resolve(p);
   if (!fs.existsSync(abs) || !fs.statSync(abs).isDirectory()) {
     throw new Error('目录不存在：' + p);
+  }
+  if (path.parse(abs).root === abs) {
+    throw new Error('不能将磁盘根目录设为工作区');
+  }
+  if (isBlockedWorkspaceRoot(abs)) {
+    throw new Error('该目录为系统关键目录，禁止设为工作区');
   }
   getDb().prepare(
     "INSERT INTO app_settings (key,value) VALUES ('workspace_root',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')",
