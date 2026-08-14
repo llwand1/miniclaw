@@ -5,9 +5,13 @@ import ChatPane from '../components/chat/ChatPane';
 import { useChatPane } from '../components/chat/useChatPane';
 import { FileView } from '../components/chat/FileView';
 import PreviewPage from './PreviewPage';
+import QuizBankPage from './QuizBankPage';
+import SettingsPage from './SettingsPage';
 import { TaskChip } from '../components/chat/TaskComponents';
 import { MC_CSS } from '../components/chat/chatStyles';
-import { IconChat, IconDots, IconEdit, IconMenu, IconNew, IconPin, IconSearch, IconShare, IconTrash } from '../components/chat/chatIcons';
+import { IconChat, IconDots, IconEdit, IconNew, IconPin, IconSearch, IconShare, IconTrash } from '../components/chat/chatIcons';
+import { IconDatabase, IconSettings, IconSun, IconMoon } from '../components/Icons';
+import { useTheme } from '../components/ThemeContext';
 import type { ModelOption, OpenReq, SelectedModel, Session, SessionNode } from '../components/chat/chatTypes';
 
 /* =========================================================================
@@ -78,21 +82,8 @@ export default function ChatPage() {
   const runningTasksRef = useRef<RunningTaskFront[]>([]);
   runningTasksRef.current = runningTasks;
 
-  // Splitter 状态
-  const [splitPct, setSplitPct] = useState(60); // 非对称：对话更宽（默认 60/40）
-  const [collapsed, setCollapsed] = useState<null | 'A' | 'B'>(null);
-  const [dragging, setDragging] = useState(false);
-  const contentRef = useRef<HTMLDivElement>(null);
-  // 侧边栏折叠（WorkBuddy 式图标条）：持久化到 localStorage
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
-    try { return localStorage.getItem('mc-sidebar-collapsed') === '1'; } catch { return false; }
-  });
-  const toggleSidebar = () => {
-    setSidebarCollapsed(v => {
-      try { localStorage.setItem('mc-sidebar-collapsed', v ? '0' : '1'); } catch { /* ignore */ }
-      return !v;
-    });
-  };
+  // 中屏视图：对话（默认）/ 题库 / 设置（由左屏底部入口切换）
+  const [centerView, setCenterView] = useState<'chat' | 'quiz' | 'settings'>('chat');
 
   // 计时 toast
   useEffect(() => {
@@ -176,23 +167,6 @@ export default function ChatPage() {
     fetch('/api/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(m) }).catch(() => {});
   }
 
-  // Splitter 拖动（<84px 自动收起该侧）
-  useEffect(() => {
-    if (!dragging) return;
-    const onMove = (e: MouseEvent) => {
-      const el = contentRef.current; if (!el) return;
-      const r = el.getBoundingClientRect();
-      const aW = e.clientX - r.left;
-      if (aW < 84) { setCollapsed('A'); setDragging(false); return; }
-      if (r.width - aW < 84) { setCollapsed('B'); setDragging(false); return; }
-      setSplitPct(Math.max(20, Math.min(80, (aW / r.width) * 100)));
-    };
-    const onUp = () => setDragging(false);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-  }, [dragging]);
-
   function refreshSessions() {
     fetch('/api/sessions').then(r => r.json()).then(setSessions).catch(() => {});
     // 会话树（父子层级）：侧边栏树状历史渲染用
@@ -215,11 +189,13 @@ export default function ChatPage() {
 
   // 在「对话面板 A」打开会话（B 面板固定为预览，不再承载对话）
   function openInPane(id: string) {
+    setCenterView('chat');
     setFocused('A');
     setPaneInfo(p => ({ ...p, A: { sessionId: id, view: 'chat' } }));
     setOpenReq({ pane: 'A', sessionId: id, nonce: Date.now() });
   }
   function newConversation() {
+    setCenterView('chat');
     setFocused('A');
     setPaneInfo(p => ({ ...p, A: { sessionId: null, view: 'chat' } }));
     setOpenReq({ pane: 'A', sessionId: null, nonce: Date.now() });
