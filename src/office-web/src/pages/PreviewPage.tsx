@@ -8,6 +8,7 @@ import { previewSandbox } from '../../../shared/preview-types';
 import {
   IconRefresh, IconTrash, IconExternalLink, IconPlus, IconMonitor, IconCode, IconCopy, IconDownload,
 } from '../components/Icons';
+import { IconFiles } from '../components/chat/chatIcons';
 
 // 去重守卫：避免反复切换 tab 时把同一份 initialHtml 重复 push 成多个 artifact
 let lastPushedHtml: string | null = null;
@@ -200,6 +201,55 @@ export default function PreviewPage({ initialHtml }: { initialHtml?: string | nu
 
   const active = artifacts.find((a) => a.id === activeId) || null;
 
+  // ─── 打开文件预览：从工作区文件树选择文件，读取内容推成 artifact 预览 ───
+  const [fileOpen, setFileOpen] = useState(false);
+  const [fsPath, setFsPath] = useState('.');
+  const [fsNodes, setFsNodes] = useState<{ name: string; path: string; type: 'dir' | 'file'; size?: number }[]>([]);
+  const [fsLoading, setFsLoading] = useState(false);
+  const [fsError, setFsError] = useState('');
+  const [fsBusy, setFsBusy] = useState(false);
+
+  const parentPath = (p: string): string => {
+    const i = p.lastIndexOf('/');
+    return i > 0 ? p.slice(0, i) : '.';
+  };
+  const fmtSize = (n: number): string =>
+    n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+
+  async function loadFsDir(rel: string) {
+    setFsLoading(true); setFsError('');
+    try {
+      const r = await fetch('/api/fs/tree?path=' + encodeURIComponent(rel));
+      const d = await r.json();
+      if (!r.ok || !Array.isArray(d.nodes)) { setFsError(d.error || '无法读取目录（请先在设置中配置工作区）'); setFsNodes([]); return; }
+      setFsPath(rel); setFsNodes(d.nodes);
+    } catch { setFsError('读取目录失败'); setFsNodes([]); }
+    finally { setFsLoading(false); }
+  }
+
+  async function openFsFile(node: { path: string; name: string; type: 'dir' | 'file' }) {
+    if (node.type === 'dir') { loadFsDir(node.path); return; }
+    if (fsBusy) return;
+    setFsBusy(true); setFsError('');
+    try {
+      const r = await fetch('/api/fs/read?path=' + encodeURIComponent(node.path));
+      const d = await r.json();
+      if (!r.ok || typeof d.content !== 'string') { setFsError(d.error || '读取文件失败'); return; }
+      if (d.binary) { setFsError('二进制文件无法预览，请用对话引用该文件'); return; }
+      const ext = (node.name.split('.').pop() || '').toLowerCase();
+      const base: Artifact = { id: 'file-' + Date.now(), sessionId: 'file', title: node.name, source: 'import', kind: 'code', content: d.content, createdAt: Date.now(), updatedAt: Date.now() };
+      // 按扩展名决定预览形态：html 直接渲染 / markdown 渲染 / 其余按代码阅读器
+      const html = (ext === 'html' || ext === 'htm')
+        ? d.content
+        : renderPreview(ext === 'md' || ext === 'markdown'
+          ? { ...base, kind: 'markdown' }
+          : { ...base, kind: 'code', lang: ext });
+      await previewClient.pushHtml(html);
+      setFileOpen(false);
+    } catch (err: any) { setFsError(err.message || '打开文件失败'); }
+    finally { setFsBusy(false); }
+  }
+
   // 订阅 artifact 列表；新产出的 artifact 自动聚焦（AI→预览闭环）
   useEffect(() => {
     return previewClient.subscribe((list) => {
@@ -318,6 +368,9 @@ export default function PreviewPage({ initialHtml }: { initialHtml?: string | nu
           <span style={{ fontSize: 11, color: 'var(--text-4)' }}>AI 产出或你编写的网页，编辑即重载</span>
         </div>
         <div style={{ flex: 1 }} />
+        <button onClick={() => { if (fileOpen) { setFileOpen(false); return; } setFileOpen(true); loadFsDir('.'); }} title="从工作区打开文件预览" style={{ ...btnStyle, border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-2)' }} onMouseEnter={btnHover} onMouseLeave={btnLeave}>
+          <IconFiles /><span>打开文件</span>
+        </button>
         <button onClick={createNew} title="新建 HTML 预览" style={{ ...btnStyle, border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-2)' }} onMouseEnter={btnHover} onMouseLeave={btnLeave}>
           <IconPlus size={14} /><span>新建</span>
         </button>
@@ -330,6 +383,44 @@ export default function PreviewPage({ initialHtml }: { initialHtml?: string | nu
           <IconCode size={11} /> Static · iframe
         </span>
       </div>
+
+      {/* 打开文件：工作区文件树选择器（点目录进入 / 点文件打开预览） */}
+      {fileOpen && (
+        <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-inset)', padding: '6px 12px 10px', maxHeight: 260, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-3)' }}>
+            <span style={{ display: 'inline-flex', color: 'var(--accent)' }}><IconFiles /></span>
+            <span style={{ fontWeight: 600, color: 'var(--text)', flexShrink: 0 }}>工作区文件</span>
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', direction: 'rtl', textAlign: 'left' }} title={fsPath}>{fsPath === '.' ? '（根目录）' : fsPath}</span>
+            {fsPath !== '.' && (
+              <button onClick={() => loadFsDir(parentPath(fsPath))} title="上级目录" style={{ ...btnStyle, border: '1px solid var(--border)', background: 'var(--bg-surface)', padding: '2px 8px', height: 24, fontSize: 11 }}>
+                ↑ 上级
+              </button>
+            )}
+            <button onClick={() => setFileOpen(false)} title="关闭" style={{ ...btnStyle, border: '1px solid var(--border)', background: 'var(--bg-surface)', padding: '2px 8px', height: 24, fontSize: 11, color: 'var(--danger)' }}>
+              关闭
+            </button>
+          </div>
+          <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {fsLoading && <div style={{ fontSize: 12, color: 'var(--text-4)', padding: '6px 4px' }}>加载中…</div>}
+            {fsError && <div style={{ fontSize: 12, color: 'var(--danger)', padding: '6px 4px' }}>{fsError}</div>}
+            {!fsLoading && !fsError && fsNodes.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-4)', padding: '6px 4px' }}>空目录</div>}
+            {fsNodes.map((n) => (
+              <button key={n.path} onClick={() => openFsFile(n)} disabled={fsBusy} title={n.path}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px', border: 'none', borderRadius: 6,
+                  background: 'transparent', color: 'var(--text-2)', cursor: 'pointer', fontSize: 12.5, textAlign: 'left',
+                  transition: 'background .12s', flexShrink: 0,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-muted)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+                <span style={{ flexShrink: 0, color: n.type === 'dir' ? 'var(--accent)' : 'var(--text-4)' }}>{n.type === 'dir' ? '📁' : '📄'}</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.name}</span>
+                {n.type === 'file' && n.size != null && <span style={{ flexShrink: 0, fontSize: 11, color: 'var(--text-5)' }}>{fmtSize(n.size)}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* artifact 多 tab 条 */}
       {artifacts.length > 0 && (

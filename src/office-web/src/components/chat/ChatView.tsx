@@ -1,11 +1,10 @@
-import { Fragment } from 'react';
+import { CSSProperties, Fragment } from 'react';
 import MessageActions from '../MessageActions';
-import { LEVELS } from './chatStyles';
-import { IconChat, IconCheck, IconContext, IconCross, IconFile, IconFileCode, IconModel, IconPlus, IconSearch, IconSend, IconSkills, IconStop, IconThink } from './chatIcons';
+import { IconChat, IconCheck, IconContext, IconCross, IconFile, IconModel, IconPlus, IconSend, IconSkills, IconStop } from './chatIcons';
 import { HistoryNavPanel } from './HistoryNavPanel';
-import { TodoList, ToolSteps } from './TaskComponents';
+import { ProcessPanel } from './ProcessPanel';
 import { AssistantBody } from './Markdown';
-import { ReasoningBlock, StageIndicator, StatusTextRotation, StoppedIndicator, WaitingIndicator } from './StatusIndicators';
+import { ReasoningBlock, StatusTextRotation, WaitingIndicator } from './StatusIndicators';
 import { fmtMsgTime } from './chatUtils';
 import type { ChatPaneStore } from './useChatPane';
 
@@ -14,14 +13,26 @@ export function ChatView({ store }: { store: ChatPaneStore }) {
   const {
     msgs, msgMetaRef, navCollapsed, setNavCollapsed, historyScrollRef,
     creatingSession, stalled, retryLast, busy, todos, steps, reasoning, stage, justDone, stopped,
-    isFirstOfSessionRef, thinkLevel, elapsed, handleActionResult, onOpenPreview,
-    extractHtml, bottomRef, selectedSkills, setSelectedSkills, attachments, setAttachments,
-    showModel, toggleModel, modelOptions, selectedModel, onSelectModel, setShowModel,
-    showSkills, toggleSkills, skillOptions, showAttach, toggleAttach, fileInputRef,
-    handlePickFiles, paneArtifacts, paneChanges, searchOn, toggleSearch, showThink,
-    toggleThink, setLevel, showCtx, toggleCtx, ctxPct, ctxColor, ctx, ctxData,
-    input, setInput, handleSend, handleStop, sendText,
+    isFirstOfSessionRef, elapsed, handleActionResult,
+    bottomRef, selectedSkills, setSelectedSkills, attachments, setAttachments,
+    showMore, openToolPanel, closeToolPanel, toggleMore,
+    showModel, modelOptions, selectedModel, onSelectModel,
+    showSkills, skillOptions, showAttach, fileInputRef,
+    handlePickFiles, paneArtifacts, paneChanges,
+    showCtx, ctxPct, ctxColor, ctx, ctxData,
+    input, setInput, handleSend, handleStop, sendText, openSession, sid,
   } = store;
+
+  // 大加号工具面板：菜单项 / 返回按钮 统一样式
+  const toolItem: CSSProperties = {
+    width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px',
+    border: 'none', background: 'transparent', borderRadius: 9, fontSize: 12.5,
+    color: 'var(--mc-text)', cursor: 'pointer', textAlign: 'left', margin: '1px 0',
+  };
+  const toolBack: CSSProperties = {
+    border: 'none', background: 'transparent', color: 'var(--mc-accent)', fontSize: 12,
+    fontWeight: 600, cursor: 'pointer', padding: '2px 6px', borderRadius: 6,
+  };
 
   return (
     <div data-mc-chatview style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -68,16 +79,19 @@ export function ChatView({ store }: { store: ChatPaneStore }) {
         {msgs.map((m, i) => {
           const isAssistant = m.role === 'assistant';
           const isLast = i === msgs.length - 1;
-          const showThinking = isAssistant && busy && isLast && !m.content && !m.error && steps.length === 0 && reasoning.length === 0;
+          const showThinking = isAssistant && busy && isLast && !m.content && !m.error && steps.length === 0 && reasoning.length === 0 && !m.quiz;
           return (
             <Fragment key={i}>
               {isAssistant && (
                 <>
-                  {m.reasoning && m.reasoning.length > 0 && <ReasoningBlock text={m.reasoning} />}
-                  {isLast && todos.length > 0 && <TodoList todos={todos} doneCount={steps.filter((s: any) => s.status !== 'running').length} stopped={stopped} />}
-                  {isLast && steps.length > 0 && <ToolSteps steps={steps} />}
-                  {isLast && stopped && <StoppedIndicator elapsed={elapsed} />}
-                  {isLast && (busy || justDone) && !stopped && <StageIndicator stage={stage} hasTool={steps.length > 0} toolCount={steps.length} done={justDone} />}
+                  {/* 历史消息的思考块保持独立渲染；最后一条消息统一走 ProcessPanel */}
+                  {!isLast && m.reasoning && m.reasoning.length > 0 && <ReasoningBlock text={m.reasoning} />}
+                  {isLast && (
+                    <ProcessPanel
+                      busy={busy} justDone={justDone} stopped={stopped} stage={stage}
+                      reasoning={reasoning || m.reasoning || ''} steps={steps} todos={todos} elapsed={elapsed}
+                    />
+                  )}
                   {isLast && busy && isFirstOfSessionRef.current && !m.content && !m.error && (
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--mc-muted)', margin: '2px 0 8px' }}>
                       <span className="mc-spin" style={{ width: 13, height: 13, borderRadius: '50%', border: '2px solid var(--mc-accent)', borderTopColor: 'transparent' }} />
@@ -113,12 +127,18 @@ export function ChatView({ store }: { store: ChatPaneStore }) {
                 border: m.error ? (isAssistant ? '1px solid transparent' : '1px solid var(--mc-danger)') : isAssistant ? 'none' : 'none',
               }}>
                 {showThinking ? (
-                  <StatusTextRotation level={thinkLevel <= 1 ? 0 : thinkLevel === 2 ? 1 : 2} elapsed={elapsed} />
+                  <StatusTextRotation level={1} elapsed={elapsed} />
                 ) : isAssistant ? (
-                  (busy && isLast && !m.content && !m.error) ? (
+                  (m.quiz && !m.content && !m.error) ? (
+                    // 出题特殊模式：不流式渲染，等待模型输出完毕后一次性渲染题目卡片
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--mc-muted)', margin: '2px 0 8px' }}>
+                      <span className="mc-spin" style={{ width: 13, height: 13, borderRadius: '50%', border: '2px solid var(--mc-accent)', borderTopColor: 'transparent' }} />
+                      <span>正在生成题目…</span>
+                    </div>
+                  ) : (busy && isLast && !m.content && !m.error) ? (
                     // 生成中但正文尚未到达（如工具调用/文件读取等待期）：呼吸徽章 + 轮播文案
                     <WaitingIndicator hasTool={steps.length > 0} />
-                  ) : <AssistantBody text={m.content} streaming={isLast && busy && !m.error} />
+                  ) : <AssistantBody text={m.content} streaming={isLast && busy && !m.error && !m.quiz} sessionId={sid} onSessionCreated={openSession} />
                 ) : (
                   m.content
                 )}
@@ -141,12 +161,6 @@ export function ChatView({ store }: { store: ChatPaneStore }) {
                     </button>
                   )}
                 </div>
-              )}
-              {isAssistant && !busy && !m.error && extractHtml(m.content) && onOpenPreview && (
-                <button onClick={() => onOpenPreview(extractHtml(m.content)!)}
-                  style={{ marginTop: 4, padding: '3px 10px', background: 'var(--mc-glass)', border: '1px solid var(--mc-hair)', borderRadius: 8, cursor: 'pointer', fontSize: 11, color: 'var(--mc-muted)' }}>
-                  在预览中打开
-                </button>
               )}
             </div>
             </Fragment>
@@ -183,171 +197,181 @@ export function ChatView({ store }: { store: ChatPaneStore }) {
           </div>
         )}
         <div className="mc-tools" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, position: 'relative' }}>
-          {/* 模型选择（opencode/workbuddy 风） */}
-          <button className={`mc-pill ${showModel ? 'open' : ''}`} onClick={toggleModel} title="切换模型 / 服务商">
-            <IconModel />
-            <span style={{ maxWidth: 130, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {selectedModel?.model || modelOptions[0]?.models?.[0] || '选择模型'}
-            </span>
+          {/* 大加号：全部工具入口（模型 / 技能 / 引用文件 / 一键出题 / 上下文用量），点击向上展开 */}
+          <button className={`mc-pill ${showMore ? 'open' : ''}`} onClick={toggleMore} title="工具（模型 / 技能 / 引用文件 / 一键出题 / 上下文用量）">
+            <IconPlus />
+            <span>工具{selectedSkills.length + attachments.length > 0 ? ` · ${selectedSkills.length + attachments.length}` : ''}</span>
           </button>
-          {showModel && (
-            <div style={{ position: 'absolute', bottom: 38, left: 0, zIndex: 7, minWidth: 240, maxWidth: 320, maxHeight: 260, overflowY: 'auto', background: 'var(--mc-glass-strong)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', border: '1px solid var(--mc-hair)', borderRadius: 14, padding: 6, boxShadow: 'var(--mc-shadow-md)' }}>
-              {modelOptions.length === 0 && (
-                <div style={{ padding: '10px 12px', fontSize: 12.5, color: 'var(--mc-muted)' }}>没有可用的服务商，请到「设置」启用。</div>
+          {showMore && (
+            <div style={{ position: 'absolute', bottom: 40, left: 0, zIndex: 7, minWidth: 300, maxWidth: 360, maxHeight: 320, overflowY: 'auto', background: 'var(--mc-glass-strong)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', border: '1px solid var(--mc-hair)', borderRadius: 14, padding: 6, boxShadow: 'var(--mc-shadow-md)' }}>
+              {/* 菜单视图：未选中子面板时展示入口列表 */}
+              {!showModel && !showSkills && !showAttach && !showCtx && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--mc-muted2)', padding: '4px 10px 6px', fontWeight: 600 }}>工具</div>
+                  <button onClick={() => openToolPanel('model')} style={toolItem}>
+                    <IconModel /><span>模型</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--mc-muted2)', maxWidth: 130, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {selectedModel?.model || modelOptions[0]?.models?.[0] || '选择模型'}
+                    </span>
+                  </button>
+                  <button onClick={() => openToolPanel('skills')} style={toolItem}>
+                    <IconSkills /><span>技能</span>
+                    {selectedSkills.length > 0 && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--mc-accent)' }}>{selectedSkills.length} 项</span>}
+                  </button>
+                  <button onClick={() => openToolPanel('attach')} style={toolItem}>
+                    <IconFile /><span>引用文件</span>
+                    {attachments.length > 0 && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--mc-accent)' }}>{attachments.length} 项</span>}
+                  </button>
+                  <button onClick={() => openToolPanel('ctx')} style={toolItem}>
+                    <IconContext /><span>上下文用量</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--mc-muted2)' }}>{ctxPct}%</span>
+                  </button>
+                  {/* 一键出题：发送预置指令，让 AI 按 [QUIZ] 结构出选择题，前端渲染成可交互卡片 */}
+                  <button
+                    onClick={() => {
+                      if (busy) return;
+                      // 强制注入 quiz-generator 技能：让模型稳定按 [QUIZ] 协议出题，不依赖它自觉触发
+                      sendText('请针对当前对话的主题，出 4 道选择题（含正确答案与解析），严格使用 [QUIZ] JSON 格式输出，不要输出多余文字。', undefined, false, ['quiz-generator']);
+                      closeToolPanel();
+                    }}
+                    disabled={busy}
+                    title="一键出题：让 AI 基于当前对话主题生成一套选择题"
+                    style={{ ...toolItem, opacity: busy ? 0.5 : 1, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                    <span style={{ fontSize: 13 }}>🎯</span><span>一键出题</span>
+                  </button>
+                </div>
               )}
-              {modelOptions.map(opt => (
-                <div key={opt.providerId}>
-                  <div style={{ fontSize: 11, color: 'var(--mc-muted2)', padding: '6px 10px 3px', fontWeight: 600 }}>{opt.providerName}</div>
-                  {opt.models.map(m => {
-                    const isActive = selectedModel?.providerId === opt.providerId && selectedModel?.model === m;
+              {/* 子面板标题栏（返回 + 标题） */}
+              {(showModel || showSkills || showAttach || showCtx) && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px 6px' }}>
+                  <button onClick={closeToolPanel} style={toolBack}>← 返回</button>
+                  <span style={{ fontSize: 11, color: 'var(--mc-muted2)', fontWeight: 600 }}>
+                    {showModel ? '切换模型' : showSkills ? '选择技能' : showAttach ? '引用文件' : '上下文用量'}
+                  </span>
+                </div>
+              )}
+              {/* 模型子面板 */}
+              {showModel && (
+                <div>
+                  {modelOptions.length === 0 && (
+                    <div style={{ padding: '10px 12px', fontSize: 12.5, color: 'var(--mc-muted)' }}>没有可用的服务商，请到「设置」启用。</div>
+                  )}
+                  {modelOptions.map(opt => (
+                    <div key={opt.providerId}>
+                      <div style={{ fontSize: 11, color: 'var(--mc-muted2)', padding: '6px 10px 3px', fontWeight: 600 }}>{opt.providerName}</div>
+                      {opt.models.map(m => {
+                        const isActive = selectedModel?.providerId === opt.providerId && selectedModel?.model === m;
+                        return (
+                          <button key={m} onClick={() => { onSelectModel({ providerId: opt.providerId, model: m }); closeToolPanel(); }}
+                            onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--mc-hair)'; } }}
+                            onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; } }}
+                            style={{ ...toolItem, justifyContent: 'space-between' }}>
+                            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m}</span>
+                            {isActive && <span style={{ color: 'var(--mc-accent)', fontSize: 12 }}>✓</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* 技能子面板 */}
+              {showSkills && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--mc-muted2)', padding: '4px 10px 6px', fontWeight: 600 }}>勾选后本次对话强制启用</div>
+                  {skillOptions.length === 0 && (
+                    <div style={{ padding: '10px 12px', fontSize: 12.5, color: 'var(--mc-muted)' }}>还没有技能，请到「设置 → 技能」导入。</div>
+                  )}
+                  {skillOptions.map(opt => {
+                    const checked = selectedSkills.includes(opt.name);
                     return (
-                      <button key={m} onClick={() => { onSelectModel({ providerId: opt.providerId, model: m }); setShowModel(false); }}
-                        style={{
-                          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-                          padding: '6px 10px', border: 'none', background: isActive ? 'var(--mc-accent-soft)' : 'transparent',
-                          borderRadius: 9, fontSize: 12.5, color: isActive ? 'var(--mc-accent)' : 'var(--mc-text)',
-                          cursor: 'pointer', textAlign: 'left', margin: '1px 0',
-                        }}>
-                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m}</span>
-                        {isActive && <span style={{ color: 'var(--mc-accent)', fontSize: 12 }}>✓</span>}
+                      <button key={opt.name} onClick={() => setSelectedSkills(prev => checked ? prev.filter(n => n !== opt.name) : [...prev, opt.name])}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--mc-hair)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                        style={{ ...toolItem, alignItems: 'flex-start' }}>
+                        <span style={{ marginTop: 1, width: 15, height: 15, borderRadius: 4, border: `1.5px solid ${checked ? 'var(--mc-accent)' : 'var(--mc-hair)'}`, background: checked ? 'var(--mc-accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          {checked && <IconCheck />}
+                        </span>
+                        <span style={{ minWidth: 0 }}>
+                          <span style={{ display: 'block', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{opt.name}</span>
+                          {opt.description && <span style={{ display: 'block', fontSize: 11, color: 'var(--mc-muted2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{opt.description}</span>}
+                        </span>
                       </button>
                     );
                   })}
                 </div>
-              ))}
-            </div>
-          )}
-          {/* 技能选择（WorkBuddy 风：手动勾选本次对话要强制启用的技能） */}
-          <button className={`mc-pill ${showSkills ? 'open' : ''}`} onClick={toggleSkills} title="选择本次对话要启用的技能">
-            <IconSkills />
-            <span>技能{selectedSkills.length > 0 ? ` · ${selectedSkills.length}` : ''}</span>
-          </button>
-          {showSkills && (
-            <div style={{ position: 'absolute', bottom: 38, left: 0, zIndex: 7, minWidth: 260, maxWidth: 340, maxHeight: 300, overflowY: 'auto', background: 'var(--mc-glass-strong)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', border: '1px solid var(--mc-hair)', borderRadius: 14, padding: 6, boxShadow: 'var(--mc-shadow-md)' }}>
-              <div style={{ fontSize: 11, color: 'var(--mc-muted2)', padding: '4px 10px 6px', fontWeight: 600 }}>选择技能（勾选后本次对话强制启用）</div>
-              {skillOptions.length === 0 && (
-                <div style={{ padding: '10px 12px', fontSize: 12.5, color: 'var(--mc-muted)' }}>还没有技能，请到「设置 → 技能」导入。</div>
               )}
-              {skillOptions.map(opt => {
-                const checked = selectedSkills.includes(opt.name);
-                return (
-                  <button key={opt.name} onClick={() => setSelectedSkills(prev => checked ? prev.filter(n => n !== opt.name) : [...prev, opt.name])}
-                    style={{ width: '100%', display: 'flex', alignItems: 'flex-start', gap: 8, padding: '7px 10px', border: 'none', background: 'transparent', borderRadius: 9, fontSize: 12.5, color: 'var(--mc-text)', cursor: 'pointer', textAlign: 'left', margin: '1px 0' }}>
-                    <span style={{ marginTop: 1, width: 15, height: 15, borderRadius: 4, border: `1.5px solid ${checked ? 'var(--mc-accent)' : 'var(--mc-hair)'}`, background: checked ? 'var(--mc-accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      {checked && <IconCheck />}
-                    </span>
-                    <span style={{ minWidth: 0 }}>
-                      <span style={{ display: 'block', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{opt.name}</span>
-                      {opt.description && <span style={{ display: 'block', fontSize: 11, color: 'var(--mc-muted2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{opt.description}</span>}
-                    </span>
+              {/* 引用子面板 */}
+              {showAttach && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--mc-muted2)', padding: '4px 10px 6px', fontWeight: 600 }}>本地文件</div>
+                  <button onClick={() => fileInputRef.current?.click()} style={toolItem}>
+                    <IconFile /><span>选择文件…（可多选，≤60KB 文本内联）</span>
                   </button>
-                );
-              })}
-            </div>
-          )}
-          {/* 引用文件（WorkBuddy「+」风：本地文件 / 对话中提到的文件） */}
-          <button className={`mc-pill ${showAttach ? 'open' : ''}`} onClick={toggleAttach} title="引用文件（本地 / 对话中提到的）">
-            <IconPlus />
-            <span>引用{attachments.length > 0 ? ` · ${attachments.length}` : ''}</span>
-          </button>
-          {showAttach && (
-            <div style={{ position: 'absolute', bottom: 38, left: 0, zIndex: 7, minWidth: 260, maxWidth: 340, maxHeight: 320, overflowY: 'auto', background: 'var(--mc-glass-strong)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', border: '1px solid var(--mc-hair)', borderRadius: 14, padding: 6, boxShadow: 'var(--mc-shadow-md)' }}>
-              <div style={{ fontSize: 11, color: 'var(--mc-muted2)', padding: '4px 10px 6px', fontWeight: 600 }}>本地文件</div>
-              <button onClick={() => fileInputRef.current?.click()} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: 'none', background: 'transparent', borderRadius: 9, fontSize: 12.5, color: 'var(--mc-text)', cursor: 'pointer', textAlign: 'left', margin: '1px 0' }}>
-                <IconFile /><span>选择文件…（可多选，≤60KB 文本内联）</span>
-              </button>
-              <div style={{ fontSize: 11, color: 'var(--mc-muted2)', padding: '8px 10px 4px', fontWeight: 600 }}>对话中提到的文件</div>
-              {paneArtifacts.filter(a => a.kind !== 'image' && typeof a.content === 'string').length === 0 && paneChanges.length === 0 && (
-                <div style={{ padding: '8px 12px', fontSize: 12.5, color: 'var(--mc-muted)' }}>还没有可引用的产物或变更。</div>
+                  <div style={{ fontSize: 11, color: 'var(--mc-muted2)', padding: '8px 10px 4px', fontWeight: 600 }}>对话中提到的文件</div>
+                  {paneArtifacts.filter(a => a.kind !== 'image' && typeof a.content === 'string').length === 0 && paneChanges.length === 0 && (
+                    <div style={{ padding: '8px 12px', fontSize: 12.5, color: 'var(--mc-muted)' }}>还没有可引用的产物或变更。</div>
+                  )}
+                  {paneArtifacts.filter(a => a.kind !== 'image' && typeof a.content === 'string').map(a => {
+                    const already = attachments.some(x => x.id === 'art-' + a.id);
+                    return (
+                      <button key={a.id} disabled={already} onClick={() => setAttachments(prev => [...prev, { id: 'art-' + a.id, name: a.title || a.id, content: a.content, mode: 'inline' as const }])}
+                        style={{ ...toolItem, opacity: already ? 0.5 : 1, cursor: already ? 'default' : 'pointer' }}>
+                        <IconFile /><span style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title || a.id}</span>
+                        {already && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--mc-accent)' }}>已引用</span>}
+                      </button>
+                    );
+                  })}
+                  {paneChanges.map(c => {
+                    const cid = 'chg-' + (c.changeId || c.path);
+                    const already = attachments.some(x => x.id === cid);
+                    return (
+                      <button key={c.changeId || c.path} disabled={already} onClick={() => setAttachments(prev => [...prev, { id: cid, name: c.path, path: c.path, mode: 'path' as const }])}
+                        style={{ ...toolItem, opacity: already ? 0.5 : 1, cursor: already ? 'default' : 'pointer' }}>
+                        <IconFile /><span style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.path}</span>
+                        {already && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--mc-accent)' }}>已引用</span>}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
-              {paneArtifacts.filter(a => a.kind !== 'image' && typeof a.content === 'string').map(a => {
-                const already = attachments.some(x => x.id === 'art-' + a.id);
-                return (
-                  <button key={a.id} disabled={already} onClick={() => setAttachments(prev => [...prev, { id: 'art-' + a.id, name: a.title || a.id, content: a.content, mode: 'inline' as const }])}
-                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', border: 'none', background: 'transparent', borderRadius: 9, fontSize: 12.5, color: already ? 'var(--mc-muted2)' : 'var(--mc-text)', cursor: already ? 'default' : 'pointer', textAlign: 'left', margin: '1px 0', opacity: already ? 0.5 : 1 }}>
-                    <IconFile /><span style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title || a.id}</span>
-                    {already && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--mc-accent)' }}>已引用</span>}
-                  </button>
-                );
-              })}
-              {paneChanges.map(c => {
-                const cid = 'chg-' + (c.changeId || c.path);
-                const already = attachments.some(x => x.id === cid);
-                return (
-                  <button key={c.changeId || c.path} disabled={already} onClick={() => setAttachments(prev => [...prev, { id: cid, name: c.path, path: c.path, mode: 'path' as const }])}
-                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', border: 'none', background: 'transparent', borderRadius: 9, fontSize: 12.5, color: already ? 'var(--mc-muted2)' : 'var(--mc-text)', cursor: already ? 'default' : 'pointer', textAlign: 'left', margin: '1px 0', opacity: already ? 0.5 : 1 }}>
-                    <IconFile /><span style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.path}</span>
-                    {already && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--mc-accent)' }}>已引用</span>}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          <button className={`mc-pill ${searchOn ? 'on' : ''}`} onClick={toggleSearch} title="联网搜索">
-            <IconSearch /><span>联网搜索</span>
-          </button>
-          <button className={`mc-pill ${showThink ? 'open' : ''}`} onClick={toggleThink} title="思考强度">
-            <IconThink /><span>{LEVELS[thinkLevel].name}</span>
-          </button>
-          {/* 上下文用量：折叠按钮（与联网搜索同排）+ 点开的分色明细 */}
-          <button className={`mc-pill ${showCtx ? 'on' : ''}`} onClick={toggleCtx} title="上下文用量（点击展开）">
-            <IconContext />
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontVariantNumeric: 'tabular-nums' }}>
-              <span style={{ width: 40, height: 5, background: '#e6e6e6', borderRadius: 3, overflow: 'hidden', display: 'inline-block' }}>
-                <span style={{ display: 'block', height: '100%', width: ctxPct + '%', background: ctxColor, transition: 'width .3s ease, background .3s ease' }} />
-              </span>
-              <span>{ctxPct}%</span>
-            </span>
-          </button>
 
-          {/* 思考强度滑块（弹层，互斥于上下文明细） */}
-          {showThink && (
-            <div style={{ position: 'absolute', bottom: 38, left: 0, zIndex: 5, width: 240, background: 'var(--mc-glass-strong)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', border: '1px solid var(--mc-hair)', borderRadius: 14, padding: '12px 14px', boxShadow: 'var(--mc-shadow-md)' }}>
-              <div style={{ fontSize: 11, color: 'var(--mc-muted)', marginBottom: 8 }}>思考强度</div>
-              <input type="range" min={0} max={4} step={1} value={thinkLevel} onChange={e => setLevel(Number(e.target.value))}
-                style={{ width: '100%', accentColor: 'var(--mc-accent)' }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
-                {LEVELS.map((l, i) => (
-                  <span key={i} onClick={() => setLevel(i)} style={{ fontSize: 10, color: i === thinkLevel ? 'var(--mc-accent)' : 'var(--mc-muted2)', cursor: 'pointer', fontWeight: i === thinkLevel ? 600 : 400 }}>{l.name}</span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 上下文用量明细（分色堆叠 + 图例） */}
-          {showCtx && (
-            <div style={{ position: 'absolute', bottom: 38, left: 0, zIndex: 6, width: 300, background: 'var(--mc-glass-strong)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', border: '1px solid var(--mc-hair)', borderRadius: 14, padding: '12px 14px', boxShadow: 'var(--mc-shadow-md)', fontSize: 12, color: 'var(--mc-muted)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
-                <span style={{ color: 'var(--mc-muted2)', display: 'flex' }}><IconContext /></span>
-                <span style={{ flex: 1, color: 'var(--mc-text)', fontSize: 12.5, fontWeight: 500 }}>上下文用量</span>
-                <span style={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums', color: ctxPct > 90 ? 'var(--mc-danger)' : ctxPct > 70 ? 'var(--mc-pin)' : 'var(--mc-text)' }}>
-                  {ctx.used.toLocaleString()} / {ctx.limit.toLocaleString()} tokens
-                </span>
-              </div>
-              <div style={{ width: '100%', height: 10, background: '#ececec', borderRadius: 5, overflow: 'hidden', display: 'flex' }}>
-                {ctx.cats.map(c => (
-                  <div key={c.key} style={{ height: '100%', width: (ctx.used > 0 ? Math.round(c.value / ctx.limit * 100) : 0) + '%', background: c.color, transition: 'width .3s ease' }} />
-                ))}
-              </div>
-              <div style={{ display: 'flex', gap: '10px 14px', flexWrap: 'wrap', marginTop: 10, fontSize: 11 }}>
-                {ctx.cats.map(c => {
-                  const ratio = ctx.used > 0 ? Math.round(c.value / ctx.used * 100) : 0;
-                  return (
-                    <span key={c.key} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: 2, background: c.color, flexShrink: 0 }} />
-                      {c.label} {c.value.toLocaleString()} · {ratio}%
+              {/* 上下文用量子面板（分色堆叠 + 图例） */}
+              {showCtx && (
+                <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--mc-muted)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
+                    <span style={{ color: 'var(--mc-muted2)', display: 'flex' }}><IconContext /></span>
+                    <span style={{ flex: 1, color: 'var(--mc-text)', fontSize: 12.5, fontWeight: 500 }}>上下文用量</span>
+                    <span style={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums', color: ctxPct > 90 ? 'var(--mc-danger)' : ctxPct > 70 ? 'var(--mc-pin)' : 'var(--mc-text)' }}>
+                      {ctx.used.toLocaleString()} / {ctx.limit.toLocaleString()} tokens
                     </span>
-                  );
-                })}
-              </div>
-              {/* 接近上限警告：进度超过 85% 时提示开新会话，避免长对话质量下滑 */}
-              {ctxPct > 85 && (
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 10, padding: '7px 9px', borderRadius: 8, background: ctxPct > 90 ? 'rgba(255,59,48,.08)' : 'rgba(255,149,0,.08)', border: '1px solid ' + (ctxPct > 90 ? 'rgba(255,59,48,.3)' : 'rgba(255,149,0,.3)'), fontSize: 11.5, color: ctxPct > 90 ? 'var(--mc-danger)' : 'var(--mc-pin)' }}>
-                  <span style={{ flexShrink: 0, marginTop: 1 }}>{ctxPct > 90 ? '⚠️' : '⚡'}</span>
-                  <span>
-                    {ctxPct > 90 ? '上下文已接近上限（' + ctxPct + '%），继续对话可能被截断或影响质量，建议新建对话。' : '上下文用量较高（' + ctxPct + '%），可考虑新建对话以保持回答质量。'}
-                    {ctxData?.model ? <span style={{ opacity: .7 }}>（模型 {ctxData.model}，上限 {ctx.limit.toLocaleString()} tokens）</span> : null}
-                  </span>
+                  </div>
+                  <div style={{ width: '100%', height: 10, background: '#ececec', borderRadius: 5, overflow: 'hidden', display: 'flex' }}>
+                    {ctx.cats.map(c => (
+                      <div key={c.key} style={{ height: '100%', width: (ctx.used > 0 ? Math.round(c.value / ctx.limit * 100) : 0) + '%', background: c.color, transition: 'width .3s ease' }} />
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: '10px 14px', flexWrap: 'wrap', marginTop: 10, fontSize: 11 }}>
+                    {ctx.cats.map(c => {
+                      const ratio = ctx.used > 0 ? Math.round(c.value / ctx.used * 100) : 0;
+                      return (
+                        <span key={c.key} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <span style={{ width: 8, height: 8, borderRadius: 2, background: c.color, flexShrink: 0 }} />
+                          {c.label} {c.value.toLocaleString()} · {ratio}%
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {/* 接近上限警告：进度超过 85% 时提示开新会话，避免长对话质量下滑 */}
+                  {ctxPct > 85 && (
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 10, padding: '7px 9px', borderRadius: 8, background: ctxPct > 90 ? 'rgba(255,59,48,.08)' : 'rgba(255,149,0,.08)', border: '1px solid ' + (ctxPct > 90 ? 'rgba(255,59,48,.3)' : 'rgba(255,149,0,.3)'), fontSize: 11.5, color: ctxPct > 90 ? 'var(--mc-danger)' : 'var(--mc-pin)' }}>
+                      <span style={{ flexShrink: 0, marginTop: 1 }}>{ctxPct > 90 ? '⚠️' : '⚡'}</span>
+                      <span>
+                        {ctxPct > 90 ? '上下文已接近上限（' + ctxPct + '%），继续对话可能被截断或影响质量，建议新建对话。' : '上下文用量较高（' + ctxPct + '%），可考虑新建对话以保持回答质量。'}
+                        {ctxData?.model ? <span style={{ opacity: .7 }}>（模型 {ctxData.model}，上限 {ctx.limit.toLocaleString()} tokens）</span> : null}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -363,27 +387,7 @@ export function ChatView({ store }: { store: ChatPaneStore }) {
         }}
           onFocusCapture={e => { e.currentTarget.style.borderColor = 'var(--mc-accent)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--mc-accent-soft)'; }}
           onBlurCapture={e => { e.currentTarget.style.borderColor = 'var(--mc-hair)'; e.currentTarget.style.boxShadow = 'var(--mc-shadow-sm)'; }}>
-          {/* 一键出题：发送预置指令，让 AI 按 [QUIZ] 结构出选择题，前端渲染成可交互卡片 */}
-          <button
-            onClick={() => {
-              if (busy) return;
-              sendText('请针对当前对话的主题，出 4 道选择题（含正确答案与解析），严格使用 [QUIZ] JSON 格式输出，不要输出多余文字。');
-            }}
-            disabled={busy}
-            title="一键出题：让 AI 基于当前对话主题生成一套选择题"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
-              padding: '8px 14px', marginBottom: '2px', border: 'none', borderRadius: 12,
-              background: 'var(--mc-accent-soft)', color: 'var(--mc-accent)',
-              cursor: busy ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
-              opacity: busy ? 0.5 : 1, transition: 'background .15s, transform .08s',
-            }}
-            onMouseEnter={e => { if (!busy) { e.currentTarget.style.background = 'rgba(10,132,255,.2)'; e.currentTarget.style.transform = 'scale(1.03)'; } }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'var(--mc-accent-soft)'; e.currentTarget.style.transform = 'scale(1)'; }}
-          >
-            🎯 <span>一键出题</span>
-          </button>
-          <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+        <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
             placeholder="输入消息…（回车发送）" disabled={busy}
             style={{ flex: 1, resize: 'none', height: 52, maxHeight: 160, padding: '14px 0', border: 'none', background: 'transparent', outline: 'none', fontSize: 14.5, fontFamily: 'inherit', color: 'var(--mc-text)', boxShadow: 'none' }} />
           {busy ? (

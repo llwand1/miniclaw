@@ -61,7 +61,7 @@ export function StoppedIndicator({ elapsed }: { elapsed?: number }) {
 }
 
 // ─── 多文案轮播加载提示：等待期切换不同提示语（想法沉淀/整理论据/检索记忆等）──
-// 思考态文案池：随思考强度档位选不同语系；每 3.6s 淡入淡出切下一句。
+// 思考态文案池：等待期轮播提示语；每 3.6s 淡入淡出切下一句。
 export function StatusTextRotation({ level, elapsed }: { level: 0 | 1 | 2; elapsed: number }) {
   const pool = level === 0 ? THINK_PHRASES.low : level === 1 ? THINK_PHRASES.mid : THINK_PHRASES.high;
   // 每 3.6s（与 mcRotFade 一个周期对齐）推进下标

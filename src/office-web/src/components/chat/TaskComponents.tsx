@@ -48,14 +48,19 @@ export function TaskChip({ task, onClick }: { task: RunningTaskFront; onClick: (
 // ─── 任务规划清单（WorkBuddy 式）：规划阶段 [TODO:...] 步骤，随工具步骤完成逐个打勾 ──
 export function TodoList({ todos, doneCount, stopped }: { todos: { id: string; content: string; status: 'pending' | 'running' | 'done' | 'stopped' }[]; doneCount: number; stopped?: boolean }) {
   if (!todos || todos.length === 0) return null;
+  // 后端下发 status 时以它为权威（实时打勾）；旧数据/兜底无 status 时退回索引推导
+  const hasStatus = todos.some(t => t.status && t.status !== 'pending');
+  const realDone = todos.filter(t => t.status === 'done').length;
   return (
     <div className="mc-scroll" style={{ border: '1px solid var(--mc-hair)', background: 'var(--mc-glass)', borderRadius: 12, padding: '8px 10px', margin: '0 0 10px', fontSize: 12.5, boxShadow: 'var(--mc-shadow-sm)' }}>
       <div style={{ fontSize: 11, color: 'var(--mc-muted)', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
         <IconCheck /> 任务清单
-        <span style={{ marginLeft: 'auto', fontWeight: 400, color: 'var(--mc-muted2)' }}>{Math.min(doneCount, todos.length)}/{todos.length} 完成</span>
+        <span style={{ marginLeft: 'auto', fontWeight: 400, color: 'var(--mc-muted2)' }}>{hasStatus ? realDone : Math.min(doneCount, todos.length)}/{todos.length} 完成</span>
       </div>
       {todos.map((t, i) => {
-        const st: 'done' | 'running' | 'pending' | 'stopped' = i < doneCount ? 'done' : i === doneCount ? (stopped ? 'stopped' : 'running') : 'pending';
+        const st: 'done' | 'running' | 'pending' | 'stopped' = hasStatus
+          ? (t.status || 'pending')
+          : (i < doneCount ? 'done' : i === doneCount ? (stopped ? 'stopped' : 'running') : 'pending');
         const color = st === 'done' ? '#34C759' : st === 'running' ? 'var(--mc-accent)' : st === 'stopped' ? 'var(--mc-pin)' : 'var(--mc-muted2)';
         return (
           <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 8 }}>

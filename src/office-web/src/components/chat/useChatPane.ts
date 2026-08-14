@@ -1,22 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { previewClient } from '../../preview/PreviewClient';
 import type { Artifact } from '../../../../shared/preview-types';
-import { LEVELS } from './chatStyles';
-import { computeCtx, lcsLineDiff, mergeStep, mergeTraceSpan } from './chatUtils';
+import { computeCtx, lcsLineDiff, mergeStep } from './chatUtils';
 import type { ChatPaneProps, ServerCtx } from './chatTypes';
 
 /** useChatPane 返回的完整状态与操作，供 ChatView / FileView / ChatPane 外壳消费。 */
 export interface ChatPaneStore {
   // 会话 / 消息
   sid: string | null;
-  msgs: { role: string; content: string; tokens?: number; error?: boolean; reasoning?: string; ts?: number | string; model?: string }[];
+  msgs: { role: string; content: string; tokens?: number; error?: boolean; reasoning?: string; ts?: number | string; model?: string; quiz?: boolean }[];
   ctxData: ServerCtx | null;
   input: string;
   busy: boolean;
-  thinkLevel: number;
-  searchOn: boolean;
+  // 大加号工具面板：打开状态 + 当前子面板（model/skills/attach/ctx）
+  showMore: boolean;
+  openToolPanel: (kind: 'model' | 'skills' | 'attach' | 'ctx') => void;
+  closeToolPanel: () => void;
+  toggleMore: () => void;
   // 弹层开关
-  showThink: boolean;
   showCtx: boolean;
   showModel: boolean;
   showSkills: boolean;
@@ -28,20 +29,17 @@ export interface ChatPaneStore {
   elapsed: number;
   artifacts: Artifact[];
   activeArtifact: string | null;
-  wsTab: 'output' | 'workspace' | 'trace';
+  wsTab: 'output' | 'workspace';
   activeChangeId: string | null;
   fileChanges: any[];
   // 连接 / 任务
   conn: 'connecting' | 'open' | 'reconnecting';
   stalled: boolean;
   creatingSession: boolean;
-  showTrace: boolean;
-  trace: any;
   steps: any[];
   todos: { id: string; content: string; status: 'pending' | 'running' | 'done' | 'stopped' }[];
   reasoning: string;
   navCollapsed: boolean;
-  traceUserClosedRef: React.MutableRefObject<boolean>;
   isFirstOfSessionRef: React.MutableRefObject<boolean>;
   bottomRef: React.RefObject<HTMLDivElement>;
   historyScrollRef: React.RefObject<HTMLDivElement>;
@@ -65,27 +63,20 @@ export interface ChatPaneStore {
   isHtmlLike: (p: string) => boolean;
   // 操作
   revertFile: (changeId: string) => void;
-  sendText: (text: string, forceSid?: string, resend?: boolean) => Promise<void>;
+  sendText: (text: string, forceSid?: string, resend?: boolean, extraSkills?: string[]) => Promise<void>;
   retryLast: () => void;
   handleActionResult: (r: any) => void;
   handleSend: () => Promise<void>;
   handleStop: () => Promise<void>;
-  setLevel: (v: number) => void;
-  extractHtml: (text: string) => string | null;
+  /** 打开指定会话（子对话 fork 后跳转用）：更新 sid + 回填历史 + 刷新侧边栏树 */
+  openSession: (sid: string) => void;
   setView: (v: 'chat' | 'files') => void;
-  toggleSearch: () => void;
-  toggleThink: () => void;
-  toggleCtx: () => void;
-  toggleModel: () => void;
-  toggleSkills: () => void;
-  toggleAttach: () => void;
   handlePickFiles: (e: React.ChangeEvent<HTMLInputElement>) => void;
   // JSX 直接调用的 setter
   setNavCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
   setActiveArtifact: React.Dispatch<React.SetStateAction<string | null>>;
   setActiveChangeId: React.Dispatch<React.SetStateAction<string | null>>;
-  setWsTab: React.Dispatch<React.SetStateAction<'output' | 'workspace' | 'trace'>>;
-  setShowTrace: React.Dispatch<React.SetStateAction<boolean>>;
+  setWsTab: React.Dispatch<React.SetStateAction<'output' | 'workspace'>>;
   setSelectedSkills: (v: string[] | ((prev: string[]) => string[])) => void;
   setAttachments: (v: any[] | ((prev: any[]) => any[])) => void;
   setInput: (v: string) => void;
@@ -98,16 +89,15 @@ export interface ChatPaneStore {
   modelOptions: ChatPaneProps['modelOptions'];
   selectedModel: ChatPaneProps['selectedModel'];
   onSelectModel: ChatPaneProps['onSelectModel'];
-  onOpenPreview?: ChatPaneProps['onOpenPreview'];
   onToast?: ChatPaneProps['onToast'];
 }
 
 /** ChatPane 全部状态、effects 与操作逻辑（从 ChatPane.tsx 拆出，组件只负责渲染）。 */
 export function useChatPane(props: ChatPaneProps): ChatPaneStore {
-  const { paneId, focused, view, openReq, initialSearchOn, modelOptions, selectedModel, onSelectModel, onFocus, onViewChange, onPaneSessionKnown, onSessionsMutated, onOpenPreview, onToast, runningSessionIds } = props;
+  const { paneId, focused, view, openReq, modelOptions, selectedModel, onSelectModel, onFocus, onViewChange, onPaneSessionKnown, onSessionsMutated, onToast, runningSessionIds } = props;
 
   const [sid, setSid] = useState<string | null>(null);
-  const [msgs, setMsgs] = useState<{ role: string; content: string; tokens?: number; error?: boolean; reasoning?: string; ts?: number | string; model?: string }[]>([]);
+  const [msgs, setMsgs] = useState<{ role: string; content: string; tokens?: number; error?: boolean; reasoning?: string; ts?: number | string; model?: string; quiz?: boolean }[]>([]);
   // 服务端真实上下文用量（limit=模型 context window，used/sys/hist/tools/files 分项）
   const [ctxData, setCtxData] = useState<ServerCtx | null>(null);
   const [input, setInput] = useState('');
@@ -119,13 +109,8 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
   // 不再误标为完成，也不进入绿色「完成」收尾窗口）
   const [stopped, setStopped] = useState(false);
   const stoppedRef = useRef(false);
-  const [thinkLevel, setThinkLevel] = useState(() => {
-    const saved = localStorage.getItem('thinkLevel');
-    return saved !== null ? Math.max(0, Math.min(4, parseInt(saved, 10))) : 2;
-  });
-  const [thinkTemp, setThinkTemp] = useState(() => LEVELS[thinkLevel].temp);
-  const [searchOn, setSearchOn] = useState(initialSearchOn);
-  const [showThink, setShowThink] = useState(false);
+  // 大加号工具面板：默认关闭；openToolPanel 打开并切到对应子面板
+  const [showMore, setShowMore] = useState(false);
   const [showCtx, setShowCtx] = useState(false);
   const [showModel, setShowModel] = useState(false);
   // 对话栏「技能选择」：用户手动勾选、本次对话强制注入的技能（不受设置里 enabled 开关限制）
@@ -140,7 +125,7 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [activeArtifact, setActiveArtifact] = useState<string | null>(null);
   // 文件视图内的子视图切换：产出文件（变更 + 产物统一列表，点击即预览）/ 工作区（文件系统浏览器）。
-  const [wsTab, setWsTab] = useState<'output' | 'workspace' | 'trace'>('output');
+  const [wsTab, setWsTab] = useState<'output' | 'workspace'>('output');
   // 产出文件视图中选中的工作区文件变更（与 activeArtifact 互斥，点击列表即切换右侧面板）
   const [activeChangeId, setActiveChangeId] = useState<string | null>(null);
   // 文件变更：AI 在工作区读/写/编辑后由网关广播，跨会话订阅（sessionId=*），
@@ -172,14 +157,17 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
   const [creatingSession, setCreatingSession] = useState(false);
   const creatingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTokenRef = useRef<number>(Date.now());
+  // SSE 事件序号（后端 pushBuffer 附带，每会话单调递增）：断线重连时作为 since 参数回放去重，
+  // 只补断线期间错过的更新，避免把已消费的 token 正文/思考再次 append 导致回复重复或冲掉。
+  const lastSeqRef = useRef(0);
+  // 是否发生过断线（onerror）：重连成功 onopen 时据此拉 live 快照对齐 replace 类状态
+  // （步骤/清单；思考正文靠 since 增量回放补齐，避免快照与回放重复累计）。
+  const hadDisconnectRef = useRef(false);
   // 本轮是否收到过 chat-error：防止成功分支的 loadSession 回填把错误提示覆盖掉
   const hadErrorRef = useRef(false);
   // 是否为「新会话首条消息」的生成中（用于把思考态文案显示为「会话创建中…」）
   const isFirstOfSessionRef = useRef(false);
 
-  // 简易 Trace：最近一次请求的调用瀑布（SSE 实时增量推送 / 可历史回看 / 可展开详情）
-  const [showTrace, setShowTrace] = useState(false);
-  const [trace, setTrace] = useState<any>(null);
   // 工具调用步骤（SSE 实时推送，前端以卡片形式展示「正在调用工具」，配合流式输出）
   const [steps, setSteps] = useState<any[]>([]);
   // 任务规划清单（WorkBuddy 式）：规划阶段 [TODO:...] 步骤清单，随 step 完成逐个打勾
@@ -191,9 +179,6 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
     const saved = localStorage.getItem('mc-nav-collapsed');
     return saved ? saved === '1' : true;
   });
-  // 用户若手动关闭过 Trace 面板，则后续请求不再自动弹出（仍可在头部点开）
-  const traceUserClosedRef = useRef(false);
-
   const clientIdRef = useRef<string>('');
   if (!clientIdRef.current) {
     clientIdRef.current = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2);
@@ -225,10 +210,13 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
     msgMetaRef.current = next;
   }
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
-
-  // 同步来自 ChatPage 的搜索开关初值（/api/search-config 异步加载后下发一次）
-  useEffect(() => { setSearchOn(initialSearchOn); }, [initialSearchOn]);
+  // 滚动跟随：流式生成期间（busy）用瞬时滚动，避免每个 token 都触发 smooth 动画
+  // 造成滚动条橡皮筋式抖动；发送/切会话/完成时保持平滑滚动。
+  useEffect(() => {
+    const el = bottomRef.current;
+    if (!el) return;
+    el.scrollIntoView({ behavior: busy ? 'auto' : 'smooth' });
+  }, [msgs, busy]);
 
   // 计时器：busy 时每秒 +1
   useEffect(() => {
@@ -243,13 +231,41 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
   }, [busy]);
 
   // 每条 SSE（按 sessionId 隔离）→ 该 Pane 独立流式接收，杜绝串台
+  // 断线重连：不依赖浏览器原生重连（无法携带 since），改为手动重连——URL 带上已收最大事件
+  // 序号 since，服务端只回放更新的缓冲事件：既补齐断线期间错过的事件，又不重复消费已收到的
+  // token 正文/思考（Last-Event-ID 语义）。重连成功后拉 live 快照对齐 replace 类状态。
   useEffect(() => {
-    const es = new EventSource(`/api/stream?sessionId=${encodeURIComponent(streamKey)}`);
-    setConn('connecting');
-    es.onopen = () => setConn('open');
-    es.onmessage = (e) => {
+    let disposed = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryDelay = 1000;
+    let es: EventSource | null = null; // 当前连接句柄：重连/清理时关闭
+    const connect = () => {
+      if (disposed) return;
+      es = new EventSource(`/api/stream?sessionId=${encodeURIComponent(streamKey)}&since=${lastSeqRef.current}`);
+      setConn('connecting');
+      es.onopen = () => {
+        if (disposed) return;
+        setConn('open');
+        retryDelay = 1000; // 重连成功：退避重置
+        // 断线重连成功后，拉 live 快照对齐 steps/todos（replace 类状态，幂等安全）；
+        // reasoning 靠 since 增量回放补齐，避免快照与回放重复累计。仅在有真实会话时拉取。
+        if (hadDisconnectRef.current && sidRef.current) {
+          fetch(`/api/sessions/${encodeURIComponent(sidRef.current)}/live`)
+            .then(r => r.json())
+            .then((st: any) => {
+              if (disposed || !st) return;
+              if (Array.isArray(st.steps)) setSteps(st.steps);
+              if (Array.isArray(st.todos)) setTodos(st.todos);
+            })
+            .catch(() => { /* 快照失败保留现有状态 */ });
+        }
+        hadDisconnectRef.current = false;
+      };
+      es.onmessage = (e) => {
       try {
         const d = JSON.parse(e.data);
+        // 记录已收最大事件序号：断线重连时作为 since 参数，服务端只回放更新的（去重）
+        if (typeof d.seq === 'number' && d.seq > lastSeqRef.current) lastSeqRef.current = d.seq;
         if (d.type === 'ping') return;
         if (d.type === 'artifact') return; // 预览由 previewClient 处理
         // 文件变更：会话级接收（只收本会话的变更，杜绝跨会话串台）；
@@ -262,15 +278,13 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
           });
           return;
         }
-        // 简易 Trace：实时流式（start/span 增量边收边画，trace 最终校准）
-        if (d.type === 'trace-start') { setTrace(d.trace); if (!traceUserClosedRef.current) setShowTrace(true); return; }
-        if (d.type === 'trace-span') { setTrace((prev: any) => mergeTraceSpan(prev, d.phase, d.span)); return; }
-        if (d.type === 'trace') { setTrace(d); return; }
         // 工具调用步骤：实时累积（running→done/error），驱动对话流内的「工具调用提示」卡片
         if (d.type === 'step') { setSteps((prev: any[]) => mergeStep(prev, d.step)); return; }
         // 任务规划清单：规划阶段 [TODO:...] 步骤清单，前端实时展示任务清单
         if (d.type === 'todos') {
-          setTodos((Array.isArray(d.todos) ? d.todos : []).map((t: any) => ({ id: t.id, content: t.content, status: 'pending' as const })));
+          // 任务规划清单：后端随工具步骤推进逐个下发 status（pending→running→done/stopped），
+          // 前端直接采用后端权威状态渲染打勾；旧事件无 status 时兜底置 pending。
+          setTodos((Array.isArray(d.todos) ? d.todos : []).map((t: any) => ({ id: t.id, content: t.content, status: (t.status || 'pending') as any })));
           return;
         }
         // 思考/推理内容：实时累积，驱动对话流内的「思考过程」可折叠块。
@@ -302,6 +316,8 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
           });
           // 兜底：把仍在「进行中」的步骤标记为失败
           setSteps(prev => prev.map((s: any) => s.status === 'running' ? { ...s, status: 'error', error: d.error } : s));
+          // 兜底：任务清单仍在运行中的项标记为「已停止」（避免一直转圈误导用户）
+          setTodos(prev => prev.map((t: any) => t.status === 'running' ? { ...t, status: 'stopped' } : t));
           setBusy(false);
           setConn('open');
           setStalled(false);
@@ -335,7 +351,10 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
           setMsgs(prev => {
             const c = prev.slice();
             const last = c[c.length - 1];
-            if (last && last.role === 'assistant') c[c.length - 1] = { ...last, content: last.content + d.content };
+            // 出题模式特殊化：流式 token 不实时拼接（保持空内容 → 前端显示稳定占位），
+            // 等生成完毕由 sendText 的 loadSession 一次性回填完整内容再渲染卡片，
+            // 避免「半截 JSON/文本 ↔ 卡片」来回跳变的不稳定观感。
+            if (last && last.role === 'assistant' && !last.quiz) c[c.length - 1] = { ...last, content: last.content + d.content };
             return c;
           });
         }
@@ -343,9 +362,12 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
           if (stoppedRef.current) {
             // 被用户停止：运行中的步骤保持「已停止」，不误标为完成，也不进入绿色「完成」收尾窗口
             setSteps(prev => prev.map((s: any) => s.status === 'running' ? { ...s, status: 'stopped', endedAt: Date.now() } : s));
+            setTodos(prev => prev.map((t: any) => t.status === 'running' ? { ...t, status: 'stopped' } : t));
           } else {
             // 正常完成：把仍在「进行中」的步骤标记为完成（防御后端未发终态）
             setSteps(prev => prev.map((s: any) => s.status === 'running' ? { ...s, status: 'done', endedAt: Date.now() } : s));
+            // 任务清单兜底：正常收尾时仍「运行中」的项全部打勾（防御后端未发 finishAll 终态）
+            setTodos(prev => prev.map((t: any) => t.status === 'running' ? { ...t, status: 'done' } : t));
           }
           // 后端在 done 事件里带回实际生成该回复的模型与 token 数，回填到最后一条 assistant 消息
           if (d.model || d.tokens != null) {
@@ -372,8 +394,23 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
         }
       } catch { /* ignore */ }
     };
-    es.onerror = () => { setConn('reconnecting'); }; // EventSource 会自动重连
-    return () => { es.close(); if (justDoneTimerRef.current) clearTimeout(justDoneTimerRef.current); };
+      es.onerror = () => {
+        if (disposed) return;
+        // 手动重连：关闭旧连接 → 指数退避（1s→2s→4s…封顶 15s）重建；URL 携带 since 只补断线期间的更新
+        es?.close();
+        setConn('reconnecting');
+        hadDisconnectRef.current = true;
+        retryTimer = setTimeout(() => { retryTimer = null; connect(); }, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 15000);
+      };
+    };
+    connect();
+    return () => {
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      es?.close();
+      if (justDoneTimerRef.current) clearTimeout(justDoneTimerRef.current);
+    };
   }, [streamKey]);
 
   // 看门狗：生成中若超过 45s 无新令牌，判定连接可能已断开
@@ -413,10 +450,11 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
     setSteps([]);
     setTodos([]);
     setReasoning('');
-    setTrace(null);
-    setShowTrace(false);
     setStopped(false);
     stoppedRef.current = false;
+    // 新会话的缓冲序号从 1 重新计数：重置已收序号与断线标记，保证重连从 0 回放新会话事件
+    lastSeqRef.current = 0;
+    hadDisconnectRef.current = false;
     // 选中产物收敛到「当前会话」的第一个（与 previewClient.subscribe 的收敛逻辑一致）
     setActiveArtifact((prev) => {
       const cur = sid;
@@ -443,7 +481,7 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
     if (!openReq || openReq.pane !== paneId) return;
     if (openReq.sessionId === null) {
       // 新建：清空本 Pane，并进入「会话创建中」过渡态（短暂展示，对标 WorkBuddy 新会话提示）
-      setSid(null); setMsgs([]); setBusy(false); setShowThink(false); setShowCtx(false);
+      setSid(null); setMsgs([]); setBusy(false); setShowCtx(false);
       setCreatingSession(true);
       if (creatingTimerRef.current) clearTimeout(creatingTimerRef.current);
       creatingTimerRef.current = setTimeout(() => setCreatingSession(false), 700);
@@ -458,7 +496,7 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
   async function loadSession(id: string) {
     // 切回一个「仍在后台生成中」的会话时保持 busy（动画恢复），不要误清为空闲
     const stillRunning = runningSessionIds?.includes(id);
-    setSid(id); setBusy(!!stillRunning); setShowThink(false); setShowCtx(false);
+    setSid(id); setBusy(!!stillRunning); setShowCtx(false);
     try {
       const d = await (await fetch(`/api/sessions/${id}`)).json();
       // 注意：兜底回填仅「以服务端为准」修正流式可能的丢包；若接口异常/格式不符，
@@ -482,28 +520,26 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
         setSteps(st.steps);
         setTodos(Array.isArray(st.todos) ? st.todos : []);
         setReasoning(typeof st.reasoning === 'string' ? st.reasoning : '');
-        // Trace：基线 payload（trace） + 增量子 span（traceSpans）合并重建
-        let t: any = st.trace || null;
-        if (Array.isArray(st.traceSpans)) {
-          for (const span of st.traceSpans) t = mergeTraceSpan(t, '', span);
-        }
-        if (t) {
-          setTrace(t);
-          if (!traceUserClosedRef.current) setShowTrace(true);
-        }
       }
     } catch { /* 快照接口失败时保留当前状态，不阻塞加载 */ }
   }
 
   // 发送一条消息。resend=true 时复用既有用户消息（重试失败回复），不再新增气泡。
-  async function sendText(text: string, forceSid?: string, resend = false) {
+  // extraSkills：本次额外强制注入的技能（如「一键出题」固定带 quiz-generator，不依赖模型自觉触发）。
+  async function sendText(text: string, forceSid?: string, resend = false, extraSkills?: string[]) {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
     setStalled(false);
     hadErrorRef.current = false;
+    // 新一轮对话：服务端缓冲序号从 1 重新计数，重置已收序号，保证断线重连 since=0 全量回放新轮事件
+    lastSeqRef.current = 0;
+    hadDisconnectRef.current = false;
+    // 出题模式标记：一键出题固定带 quiz-generator 技能 → 该消息特殊化处理
+    // （流式中不实时渲染，输出完毕一次性渲染成题目卡片，避免半截 JSON/文本跳变）
+    const isQuiz = !!(extraSkills && extraSkills.includes('quiz-generator'));
     if (!resend) {
       setInput('');
-      setMsgs(prev => [...prev, { role: 'user', content: trimmed }, { role: 'assistant', content: '', reasoning: '', ts: Date.now(), model: '' }]);
+      setMsgs(prev => [...prev, { role: 'user', content: trimmed }, { role: 'assistant', content: '', reasoning: '', ts: Date.now(), model: '', quiz: isQuiz }]);
     } else {
       setMsgs(prev => [...prev, { role: 'assistant', content: '', reasoning: '', ts: Date.now(), model: '' }]);
     }
@@ -524,9 +560,10 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
       const data = await (await fetch('/api/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text: trimmed, sessionId: targetSid, temperature: thinkTemp, resend,
+          text: trimmed, sessionId: targetSid, resend,
           ...(selectedModel ? { providerId: selectedModel.providerId, model: selectedModel.model } : {}),
-          ...(selectedSkills.length ? { skillNames: [...selectedSkills] } : {}),
+          ...((selectedSkills.length || (extraSkills && extraSkills.length))
+            ? { skillNames: [...new Set([...selectedSkills, ...(extraSkills || [])])] } : {}),
           ...(attachments.length ? { attachments: attachments.map(a => ({ name: a.name, path: a.path, content: a.content, mode: a.mode })) } : {}),
         }),
       })).json();
@@ -597,18 +634,6 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
     setBusy(false);
   }
 
-  function setLevel(v: number) {
-    const l = Math.max(0, Math.min(4, Math.round(v)));
-    setThinkLevel(l);
-    setThinkTemp(LEVELS[l].temp);
-    localStorage.setItem('thinkLevel', String(l));
-  }
-
-  function extractHtml(text: string): string | null {
-    const m = text.match(/```html\s*\n?([\s\S]*?)```/);
-    return m ? m[1] : null;
-  }
-
   // 会话隔离：previewClient 的产物是全应用全局列表，这里只取「当前会话」的产物与变更
   // （每个对话独立，文件提及只属于本对话，避免双 Pane 串台）。附件面板与文件视图共用。
   const paneArtifacts = sid ? artifacts.filter(a => a.sessionId === sid) : [];
@@ -625,33 +650,26 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
   const ctxColor = ctxPct > 90 ? 'var(--mc-danger)' : ctxPct > 70 ? 'var(--mc-pin)' : 'var(--mc-accent)';
 
   // ── 视图切换（对话 / 文件）──
-  function setView(v: 'chat' | 'files') { onViewChange(v); setShowThink(false); setShowCtx(false); }
+  function setView(v: 'chat' | 'files') { onViewChange(v); setShowCtx(false); }
 
-  // ── 工具栏：联网搜索 / 思考强度 / 上下文用量 ──
-  function toggleSearch() {
-    const next = !searchOn;
-    setSearchOn(next);
-    fetch('/api/search-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: next, provider: 'duckduckgo' }) }).catch(() => {});
+  // ── 大加号工具面板：模型 / 技能 / 引用 / 上下文用量 ──
+  // openToolPanel：打开面板并切到指定子面板（互斥，一次只显示一个子面板）
+  function openToolPanel(kind: 'model' | 'skills' | 'attach' | 'ctx') {
+    setShowMore(true);
+    setShowModel(kind === 'model');
+    setShowSkills(kind === 'skills');
+    setShowAttach(kind === 'attach');
+    setShowCtx(kind === 'ctx');
   }
-  function toggleThink() {
-    const open = !showThink;
-    setShowThink(open); setShowCtx(false); setShowAttach(false);
+  // closeToolPanel：关闭整个面板并复位所有子面板
+  function closeToolPanel() {
+    setShowMore(false);
+    setShowModel(false); setShowSkills(false); setShowAttach(false); setShowCtx(false);
   }
-  function toggleCtx() {
-    const open = !showCtx;
-    setShowCtx(open); setShowThink(false); setShowAttach(false);
-  }
-  function toggleModel() {
-    const open = !showModel;
-    setShowModel(open); setShowThink(false); setShowCtx(false); setShowAttach(false);
-  }
-  function toggleSkills() {
-    const open = !showSkills;
-    setShowSkills(open); setShowModel(false); setShowThink(false); setShowCtx(false); setShowAttach(false);
-  }
-  function toggleAttach() {
-    const open = !showAttach;
-    setShowAttach(open); setShowModel(false); setShowSkills(false); setShowThink(false); setShowCtx(false);
+  // toggleMore：切换大加号面板开关
+  function toggleMore() {
+    if (showMore) closeToolPanel();
+    else setShowMore(true);
   }
 
   // 用户从「+」本地文件选择框选中的文件：小文本内联（前端读内容）；其余（大文件/PDF/Word/图片等）
@@ -695,6 +713,14 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
     }
   };
 
+  // 打开指定会话（fork 出的子对话跳转用）：同步 sid / 面板归属 / 历史回填 / 侧边栏树刷新
+  function openSession(id: string) {
+    setSid(id);
+    onPaneSessionKnown?.(id);
+    loadSession(id);
+    onSessionsMutated?.();
+  }
+
   // ── Chat 视图派生值 ──
   const lastMsg = msgs[msgs.length - 1];
   const lastIsAssistant = lastMsg?.role === 'assistant';
@@ -714,25 +740,26 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
 
   return {
     // 会话 / 消息
-    sid, msgs, ctxData, input, busy, thinkLevel, searchOn,
+    sid, msgs, ctxData, input, busy,
+    // 大加号工具面板
+    showMore, openToolPanel, closeToolPanel, toggleMore,
     // 弹层开关
-    showThink, showCtx, showModel, showSkills, selectedSkills, skillOptions,
+    showCtx, showModel, showSkills, selectedSkills, skillOptions,
     showAttach, attachments, fileInputRef, elapsed, artifacts, activeArtifact,
     wsTab, activeChangeId, fileChanges,
     // 连接 / 任务
-    conn, stalled, creatingSession, showTrace, trace, steps, todos, reasoning, justDone, stopped,
-    navCollapsed, traceUserClosedRef, isFirstOfSessionRef, bottomRef, historyScrollRef, msgMetaRef,
+    conn, stalled, creatingSession, steps, todos, reasoning, justDone, stopped,
+    navCollapsed, isFirstOfSessionRef, bottomRef, historyScrollRef, msgMetaRef,
     // 派生值
     paneArtifacts, paneChanges, sessionTitle, ctx, ctxPct, ctxColor, stage,
     active, activeChange, activeDiff, diffAdds, diffDels, fmtClock, isHtmlLike,
     // 操作
-    revertFile, sendText, retryLast, handleActionResult, handleSend, handleStop,
-    setLevel, extractHtml, setView, toggleSearch, toggleThink, toggleCtx,
-    toggleModel, toggleSkills, toggleAttach, handlePickFiles,
+    revertFile, sendText, retryLast, handleActionResult, handleSend, handleStop, openSession,
+    setView, handlePickFiles,
     // JSX 直接调用的 setter
-    setNavCollapsed, setActiveArtifact, setActiveChangeId, setWsTab, setShowTrace,
+    setNavCollapsed, setActiveArtifact, setActiveChangeId, setWsTab,
     setSelectedSkills, setAttachments, setInput, setShowModel, setShowSkills, setShowAttach,
     // 透传 props（只读）
-    focused, view, modelOptions, selectedModel, onSelectModel, onOpenPreview, onToast,
+    focused, view, modelOptions, selectedModel, onSelectModel, onToast,
   };
 }

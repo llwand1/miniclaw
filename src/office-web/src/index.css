@@ -146,3 +146,27 @@ input:focus, textarea:focus, select:focus, button:focus-visible {
 @keyframes qcCaret {
   50% { opacity: 0; }
 }
+
+/* ═══ QuizCard 连对动画（百词斩式：弹跳放大 + 火焰色） ═══ */
+@keyframes qcStreak {
+  0%   { transform: scale(.4) rotate(-8deg); opacity: 0; }
+  45%  { transform: scale(1.25) rotate(4deg); opacity: 1; }
+  70%  { transform: scale(.92) rotate(-2deg); }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+/* 答对：选项/徽章绿色弹跳 */
+@keyframes qcCorrect {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+/* 答错：选项/徽章红色抖动 */
+@keyframes qcWrong {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}

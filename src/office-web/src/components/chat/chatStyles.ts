@@ -136,16 +136,18 @@ export const MC_CSS = `
   [data-theme="dark"] .mc-kw{color:#f472b6;}
   [data-theme="dark"] .mc-ty{color:#38bdf8;}
   [data-theme="dark"] .mc-quote{background:rgba(129,140,248,.08);}
-`;
 
-/** 思考强度档位：极简→深度，驱动 temperature */
-export const LEVELS = [
-  { name: '极简', temp: 0.30 },
-  { name: '简洁', temp: 0.50 },
-  { name: '均衡', temp: 0.70 },
-  { name: '深入', temp: 0.40 },
-  { name: '深度', temp: 0.25 },
-];
+  /* 流式正文：正在输入的尾部段落（关闭淡入动画，避免每 token 重放闪烁） */
+  .mc-tail-stream{animation:none;}
+
+  /* 流式工具调用：运行中动画点 + 卡片滑入 */
+  .mc-dots{display:inline-flex;gap:2px;align-items:center;}
+  .mc-dots i{width:3px;height:3px;border-radius:50%;background:var(--mc-accent);animation:mcDotP 1.2s infinite;}
+  .mc-dots i:nth-child(2){animation-delay:.18s;}
+  .mc-dots i:nth-child(3){animation-delay:.36s;}
+  @keyframes mcDotP{0%,60%,100%{opacity:.25;transform:translateY(0);}30%{opacity:1;transform:translateY(-2px);}}
+  @keyframes mcToolIn{from{opacity:0;transform:translateY(-4px) scale(.98);}to{opacity:1;transform:none;}}
+`;
 
 /** 本地兜底上下文上限（tokens）；真实值由服务端 /api/sessions/:id/context 提供 */
 export const CTX_LIMIT_FALLBACK = 65536;
@@ -156,7 +158,7 @@ export const TEXT_FOLD_CHARS = 600;
 /** 代码块折叠阈值：超过该行数的代码块默认收起，避免大文件一次性铺满对话流 */
 export const CODE_FOLD_LINES = 40;
 
-/** 思考态文案池：随思考强度档位选不同语系；每 3.6s 淡入淡出切下一句 */
+/** 思考态文案池：等待期轮播提示语；每 3.6s 淡入淡出切下一句 */
 export const THINK_PHRASES: Record<'low' | 'mid' | 'high', string[]> = {
   low: ['正在组织语言', '检索相关上下文', '整理思路'],
   mid: ['想法沉淀一下', '整理论据', '权衡不同方案', '回顾相关记忆'],

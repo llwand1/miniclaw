@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { parseQuiz, QuizCard } from '../QuizCard';
 import { CODE_FOLD_LINES } from './chatStyles';
 
@@ -95,8 +95,31 @@ export function CodeFoldingBlock({ html, streaming }: { html: string; streaming:
   );
 }
 
+// 流式拆块：把累积文本切成「已完成块」(head) +「正在输入」(tail)。
+// head 交给 parseMdBlocks 稳定分块渲染；tail 是模型还在写、尚未被空行/围栏收尾的部分，
+// 实时按段落（或未闭合代码块）渲染 + 光标跟随——避免「当前段落要等空行才整段出现」
+// 的块状跳跃，还原 ChatGPT 式逐字推进的打字机观感。
+function splitStreamTail(md: string): { head: string; tail: string; inFence: boolean } {
+  const lines = (md || '').split('\n');
+  let inFence = false;
+  let lastBreak = 0; // head 结束下标（含）：空白行 / 块标记行 / 围栏行之后的第一个下标
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^```/.test(line)) { inFence = !inFence; lastBreak = i + 1; continue; }
+    if (inFence) continue;
+    if (line.trim() === '') { lastBreak = i + 1; continue; }
+    if (/^(#{1,3}\s|>|[\s]*[-*]\s|[\s]*\d+\.\s|\|.*\|\s*$)/.test(line)) { lastBreak = i + 1; continue; }
+  }
+  return { head: lines.slice(0, lastBreak).join('\n'), tail: lines.slice(lastBreak).join('\n'), inFence };
+}
+
 export function MarkdownStream({ text, streaming }: { text: string; streaming: boolean }) {
-  const blocks = parseMdBlocks(text);
+  const sp = streaming ? splitStreamTail(text) : null;
+  // 块解析只在「已完成块集合」变化时重跑（useMemo），流式期间每 token 只做 O(行数) 的 tail 渲染，
+  // 杜绝长回复时整篇文本反复重解析导致的掉帧。
+  const blocks = useMemo(() => parseMdBlocks(sp ? sp.head : text), [sp ? sp.head : text]);
+  const tail = sp ? sp.tail : '';
+  const inFence = sp ? sp.inFence : false;
   return (
     <div className="mc-md">
       {blocks.map((b, idx) => {
@@ -105,14 +128,39 @@ export function MarkdownStream({ text, streaming }: { text: string; streaming: b
         }
         return <div key={idx} className="mc-md-block" dangerouslySetInnerHTML={{ __html: b }} />;
       })}
-      {streaming && <span className="mc-caret" />}
+      {streaming && tail !== '' && (
+        inFence ? (
+          // 未闭合代码块：实时按代码样式渲染 + 光标
+          <pre className="mc-pre" style={{ animation: 'none' }}><code>{escHtml(tail)}<span className="mc-caret" /></code></pre>
+        ) : (
+          // 正在输入的段落：实时渲染 + 行内光标（不再等空行才出现）
+          <div className="mc-tail-stream" dangerouslySetInnerHTML={{ __html: inlineMd(tail).replace(/\n/g, '<br>') + '<span class="mc-caret"></span>' }} />
+        )
+      )}
+      {streaming && tail === '' && <span className="mc-caret" />}
     </div>
   );
 }
 
-/** 助手消息正文：优先渲染选择题卡片（[QUIZ] 解析成功时），否则走 Markdown */
-export function AssistantBody({ text, streaming }: { text: string; streaming: boolean }) {
+/** 助手消息正文：优先渲染选择题卡片（[QUIZ] 解析成功时），否则走 Markdown。
+ *  流式期间 [QUIZ] 已出现但 JSON 未完整/未闭合时，显示占位提示而非半截原始 JSON，
+ *  避免「一下子是文本一下子是题目」的观感跳变；流结束后若仍未解析成功再回退 Markdown。
+ *  sessionId / onSessionCreated：透传给 QuizCard 用于 fork 子对话（一键分析继续出题 / 单题解析）。 */
+export function AssistantBody({ text, streaming, sessionId, onSessionCreated }: {
+  text: string;
+  streaming: boolean;
+  sessionId?: string | null;
+  onSessionCreated?: (sid: string) => void;
+}) {
   const quiz = parseQuiz(text);
-  if (quiz) return <QuizCard data={quiz} streaming={streaming} />;
+  if (quiz) return <QuizCard data={quiz} streaming={streaming} sessionId={sessionId} onSessionCreated={onSessionCreated} />;
+  if (streaming && /\[QUIZ\]/i.test(text)) {
+    return (
+      <div className="mc-md" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--mc-muted)', fontSize: 12.5, padding: '4px 2px' }}>
+        <span style={{ display: 'inline-block', width: 7, height: 14, background: 'var(--mc-accent)', animation: 'qcCaret 1s step-end infinite' }} />
+        正在生成题目…
+      </div>
+    );
+  }
   return <MarkdownStream text={text} streaming={streaming} />;
 }
