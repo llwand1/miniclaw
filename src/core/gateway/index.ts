@@ -14,6 +14,7 @@ import {
   getCustomSystemPrompt as getCustomSystemPromptImpl, setCustomSystemPrompt as setCustomSystemPromptImpl,
 } from './providers';
 import { saveMemo } from './memory';
+import { seedMemorizeIfEmpty } from './memorize-seed';
 import {
   estimateTokens, estimateSessionContext as estimateSessionContextImpl,
   getContextLimit as getContextLimitImpl,
@@ -103,6 +104,8 @@ export class Gateway extends EventEmitter implements ChatFlowHost {
     // P0-1：空库种子——providers/agents 为空表时注入默认服务商 + 默认 Agent，
     // 全新机器开箱即可发起对话（配置 API Key 后真正可用），不再抛「No default agent」500。
     this.seedIfEmpty();
+    // 背背背默认词库：memorize 表为空时注入 CET4/CET6 词库（约 3900 词），见 memorize-seed.ts
+    seedMemorizeIfEmpty();
     log.info('Gateway started');
     this.schedulerHost.start();
   }
