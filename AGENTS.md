@@ -18,12 +18,22 @@
 | `src/core/gateway/db.ts` | SQLite 迁移 + 表定义 |
 | `src/core/adapter/` | OpenAI兼容 / Anthropic 适配器 |
 | `src/core/agent/index.ts` | Agent 执行逻辑 |
+| `src/core/search/index.ts` | 联网搜索/抓取入口（优先 Python 强化服务，失败降级 Node 直连） |
+| `src/core/search/python-bridge.ts` | Python 联网服务桥接层（子进程 + stdio JSON-RPC，懒启动/崩溃重启/超时保护） |
+| `services/py-search/` | Python 联网强化服务（Bing/百度/DDG 多源并发 + 代理 + 重试；抓取 trafilatura + playwright 可选 JS 渲染） |
 | `src/office-server/routes/api.ts` | Express REST + SSE 路由（登录/会话/搜索/文件） |
+| `src/office-server/routes/quiz.ts` | 题库/出题/题解/薄弱点 + AI 导入（三题型） |
+| `src/office-server/routes/memorize.ts` | 背背背：词条 CRUD + 复习进度 + AI 联动 |
 | `src/office-server/index.ts` | office-server 启动 + SSE 广播 |
-| `src/office-web/src/pages/ChatPage.tsx` | 主窗对话 UI（含历史导航、双窗、Trace） |
+| `src/office-web/src/pages/ChatPage.tsx` | 主窗对话 UI（中屏视图切换 chat/quiz/memorize/settings） |
+| `src/office-web/src/pages/QuizBankPage.tsx` | 题库页（练习/导出/AI 导入） |
+| `src/office-web/src/pages/MemorizePage.tsx` | 背背背翻卡背诵页 |
+| `src/office-web/src/components/chat/WelcomeHero.tsx` | 空会话新任务开始页（吉祥物+大输入框+快捷任务） |
+| `src/office-web/src/components/chat/Mascot.tsx` | 书精灵吉祥物（可互动） |
+| `src/office-web/src/components/AdviceRequestCard.tsx` | AI 学习建议卡片（fork 子对话） |
 | `src/office-web/src/pages/SettingsPage.tsx` | 设置页（服务商/搜索/GitHub/微信登录/教学引导） |
 | `src/office-web/src/pages/PreviewPage.tsx` | 预览页 |
-| `src/office-web/src/App.tsx` | 顶层 tab 路由 |
+| `src/office-web/src/App.tsx` | 侧边栏导航分组（工作区/系统）+ 主路由 |
 | `docs/ARCHITECTURE.md` | 架构拓扑详解 |
 | `docs/SSE-CONTRACT.md` | SSE 事件契约 |
 
@@ -125,7 +135,10 @@
 | wechat_tokens 表 | L190 |
 | app_settings 表 | L219 |
 | session_shares 表 | L243 |
-| traces / spans 表 | L250-258 |
+| quiz_bank 表 | 题库（data=QuizData，source=ai/import/manual） |
+| quiz_stats 表 | 逐题练习统计（attempts/correct/streak，PK=quiz_id+question_index） |
+| memorize 表 | 背背背词条（term/definition/category/difficulty/review_count/mastered） |
+| traces / spans 表 | ~~已删除~~（2026-08-13 Trace 功能移除，勿再引用） |
 
 ### 前端 ChatPage（src/office-web/src/pages/ChatPage.tsx）
 
@@ -138,7 +151,8 @@
 | 发送消息 | `sendText` | L1229 |
 | 加载会话 | `loadSession` | L1212 |
 | 重试 | `retryLast` | L1284 |
-| Trace 瀑布图 | `TraceWaterfall` | L227 |
+| 中屏视图切换 | `centerView`（chat/quiz/memorize/settings） | ChatPage 顶层 state |
+| 背诵页 fork 词条学习 | `forkMemorizeTerm` | ChatPage（fork 子对话 → AI 讲解/造句/出题） |
 | 工具步骤卡片 | `ToolSteps` | L353 |
 | 思考过程块 | `ReasoningBlock` | L509 |
 | 上下文用量计算 | `computeCtx` | L529 |
@@ -146,8 +160,11 @@
 | 代码块折叠 | `CodeFoldingBlock` / `CODE_FOLD_LINES` | 对话流大代码块（超 40 行收起） |
 | 工作区浏览器 | `WorkspaceExplorer` | L571 |
 | Markdown 流式渲染 | `MarkdownStream` | L614 |
-| 选择题卡片 | `QuizCard` / `parseQuiz` / `AssistantBody` | L626（quiz-generator 技能：[QUIZ] JSON → 卡片） |
-| 外壳(侧边栏+分栏) | `ChatPage` | L1692 |
+| 选择题/填空/解答卡片 | `QuizCard` / `parseQuiz` / `AssistantBody` | quiz-generator 技能：[QUIZ] JSON → 卡片（三题型 + 收词入背诵本） |
+| 书精灵吉祥物 | `Mascot`（components/chat/Mascot.tsx） | 欢迎页主视觉，可互动（消息头像降级纯装饰） |
+| 空会话开始页 | `WelcomeHero`（components/chat/WelcomeHero.tsx） | 大输入框 + 快捷任务预设卡片 |
+| AI 学习建议卡片 | `AdviceRequestCard`（components/AdviceRequestCard.tsx） | 出题/讲解后 fork 子对话要建议+资料链接 |
+| 外壳(侧边栏+分栏) | `ChatPage` | ChatPage.tsx 顶层组件 |
 
 ### 前端预览页（src/office-web/src/pages/PreviewPage.tsx）
 
