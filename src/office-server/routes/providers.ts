@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getDb } from '../../core/gateway/db';
 import { Gateway } from '../../core/gateway';
 import { createLogger } from '../../core/logger';
-import { encryptSecret } from '../../core/security/crypto';
+import { encryptSecret, decryptSecret } from '../../core/security/crypto';
 
 const log = createLogger('api:providers');
 
@@ -92,7 +92,7 @@ export function registerProviders(r: Router, gw: Gateway): void {
       try {
         const r = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${p.api_key}` },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${decryptSecret(p.api_key)}` },
           body: JSON.stringify({ model: p.default_model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1, stream: false }),
           signal: controller.signal,
         });

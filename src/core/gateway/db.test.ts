@@ -15,17 +15,17 @@ import { decryptSecret, isEncrypted } from '../security/crypto';
 describe('gateway/db', () => {
   afterAll(() => { closeDb(); });
 
-  it('DBS-01 建表:22 张正式表(21 migrate + approval_queue,排除 sqlite_* 系统表与 _new 重建)', () => {
+  it('DBS-01 建表:23 张正式表(22 migrate + approval_queue,排除 sqlite_* 系统表与 _new 重建)', () => {
     const rows = getDb().prepare(`
       SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_new' ORDER BY name
     `).all() as any[];
     const names = rows.map(r => r.name);
-    // 22 张业务表(21 张 migrate + ensureApprovalTable 建的 approval_queue)
-    expect(names.length).toBe(22);
+    // 23 张业务表(22 张 migrate + ensureApprovalTable 建的 approval_queue)
+    expect(names.length).toBe(23);
     for (const t of ['providers', 'agents', 'sessions', 'messages', 'skills', 'cron_jobs',
       'scheduled_tasks', 'token_usage', 'files', 'window_state', 'memories', 'search_config',
       'github_oauth_config', 'users', 'github_tokens', 'wechat_oauth_config', 'wechat_tokens',
-      'app_settings', 'quiz_bank', 'quiz_stats', 'session_shares', 'approval_queue']) {
+      'app_settings', 'quiz_bank', 'quiz_stats', 'memorize', 'session_shares', 'approval_queue']) {
       expect(names).toContain(t);
     }
   });
