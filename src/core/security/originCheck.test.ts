@@ -67,8 +67,14 @@ describe('security/originCheck', () => {
   });
 
   it('corsWhitelist:本地放行、外部拒绝、无 Origin 同源放行', () => {
+    // 无 Origin(同源/服务端内部调用)→ 放行
     corsWhitelist(undefined, (err, allow) => { expect(err).toBeNull(); expect(allow).toBe(true); });
+    // 本地开发端口 → 放行
     corsWhitelist('http://127.0.0.1:5173', (err, allow) => { expect(err).toBeNull(); expect(allow).toBe(true); });
-    corsWhitelist('http://evil.com', (err, allow) => { expect(err).toBeInstanceOf(Error); expect(allow).toBe(false); });
+    corsWhitelist('http://localhost:5173', (err, allow) => { expect(err).toBeNull(); expect(allow).toBe(true); });
+    // 外部恶意来源 → 显式拒绝(allow=false,不抛错;真正的 403 由 originCheck 中间件给)
+    corsWhitelist('http://evil.com', (err, allow) => { expect(err).toBeNull(); expect(allow).toBe(false); });
+    // 非法 URL(无法解析)→ 同样拒绝
+    corsWhitelist('not-a-url', (err, allow) => { expect(err).toBeNull(); expect(allow).toBe(false); });
   });
 });

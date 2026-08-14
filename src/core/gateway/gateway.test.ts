@@ -118,8 +118,8 @@ describe('gateway/integration', () => {
     expect(steps[0].step.tool).toBe('search');
     expect(steps[0].step.status).toBe('running');
     expect(steps[1].step.status).toBe('done');
-    // performSearches 收到查询词(模块级 mock)
-    expect(searcherMod.performSearches).toHaveBeenCalledWith(['测试关键词'], expect.anything());
+    // performSearches 收到查询词(模块级 mock;签名 queries, config, onProgress?)
+    expect(searcherMod.performSearches).toHaveBeenCalledWith(['测试关键词'], expect.anything(), expect.anything());
 
     // 最终回答落库
     const msgs = db.prepare("SELECT content FROM messages WHERE session_id=? AND role='assistant'").all(sid) as any[];
@@ -241,8 +241,8 @@ describe('gateway/integration', () => {
     const sid = await gw.handleMessage({ text: '查一下', source: 'main' });
     expect(typeof sid).toBe('string');
 
-    // 执行了 search_web:step 事件 + searcher 收到查询词
-    expect(searcherMod.performSearches).toHaveBeenCalledWith(['测试关键词'], expect.anything());
+    // 执行了 search_web:step 事件 + searcher 收到查询词(签名 queries, config, onProgress?)
+    expect(searcherMod.performSearches).toHaveBeenCalledWith(['测试关键词'], expect.anything(), expect.anything());
     expect(steps.length).toBeGreaterThanOrEqual(2);
     expect(steps[0].step.name).toBe('联网搜索');
     expect(steps[0].step.tool).toBe('search');
