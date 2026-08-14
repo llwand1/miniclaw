@@ -16,6 +16,20 @@
   先回放缓冲，再接入实时推送；本轮已终止（`done` / `chat-error`）则回放后清空缓冲。
 - 心跳：每 15s 发送 `{ "type": "ping" }` 保活；缓冲有 60s TTL 兜底回收。
 
+**断线重连（2026-08-13 新增，Last-Event-ID 语义）：**
+
+- 每个入缓冲的事件都带**单调递增序号** `seq`（按会话独立计数）；新一轮对话（sendText 后）从 1 重新计数。
+- 客户端重连时携带**已收到的最大序号**（URL 参数 `?since=<n>`，兼容 `Last-Event-ID` 头），
+  服务端只回放 `seq > since` 的事件——既补齐断线期间错过的事件，又不重复回放已消费的
+  token 正文/思考（避免把整段回复 append 两遍导致重复或冲掉）。
+- 前端为**手动重连**（不依赖 EventSource 原生自动重连，因其无法携带 since）：断线后指数退避
+  （1s→2s→4s…封顶 15s）重建连接；重连成功（onopen）后拉 `GET /api/sessions/:id/live` 快照，
+  对齐 replace 类状态（steps/todos；reasoning 靠 since 增量回放补齐，避免与快照重复累计）。
+- 心跳兼做**断链探测**：对已销毁（`destroyed`/`writableEnded`）或写入失败的连接从订阅集合移除，
+  防止僵尸连接持续接收事件造成资源泄漏。
+- 前端在**切换会话**与**发送新消息**时重置已收序号为 0（服务端新一轮序号从 1 重新计数，
+  否则旧序号会让 since 跳过新轮全部事件）。
+
 ---
 
 ## 2. 事件类型（Gateway emit → office-server 广播 → 前端消费）
@@ -31,14 +45,17 @@
 > - artifact.id 由内容指纹生成，`publishArtifacts` 按会话维护已发 id 集合，重复提取自动跳过，保证同一份内容只预览一次。
 > - 提取范围已放宽：```` ```html/markup/htm/svg ````、无语言标记但内容像 HTML 的围栏块、以及整段裸 `<!doctype html>…</html>` 文档，都会被识别成 html artifact（不再要求必须写 ```` ```html ```` 围栏）。
 | `chat-error` | 后端→前端 | 本轮失败 | `sessionId`, `error:string` |
-| `trace-start` | 后端→前端 | 请求开始（含未结束的 root span） | `sessionId`, `trace:TracePayload` |
-| `trace-span` | 后端→前端 | 单个 Span 起/止增量 | `sessionId`, `phase:'start'\|'end'`, `span:Span` |
-| `trace` | 后端→前端 | 请求结束的完整 Trace（校准用） | `sessionId`, `...TracePayload` |
-| `step` | 后端→前端 | 工具调用步骤(原生 function call 或文本标记触发的搜索/抓取/文件操作) | `sessionId`, `step:Step` |
+| `step` | 后端→前端 | 工具调用步骤(原生 function call 或文本标记触发的搜索/抓取/文件操作)；**运行中同一 stepId 可多次推送**（`progress` 逐项上报） | `sessionId`, `step:Step` |
+| `todos` | 后端→前端 | 任务规划清单（WorkBuddy 式）；规划阶段解析 `[TODO:...]` 下发，随工具步骤完成**逐个打勾**（每次变化整体推送全量） | `sessionId`, `todos:Todo[]` |
 | `ping` | 后端→前端 | 心跳保活 | — |
 
-> `trace-start` / `trace-span` / `step` 均走"缓冲 + 广播"，兼容竞态；`trace`（完整校准）仅广播不缓冲。
-> 前端增量合并函数：`mergeTraceSpan()`、`mergeStep()`（见 `src/office-web/src/pages/ChatPage.tsx`）。
+> **todos 事件（任务清单实时打勾）**：后端权威驱动，前端按下发 `status` 渲染，不再靠 step 数索引硬推。
+> - 初始下发：全 `pending`（首项视为 `running`）；随后 search/fetch/fs（含原生工具循环）每完成一步 `complete()` 推送一次，该项变 `done`、下一项变 `running`。
+> - 收尾：正常完成 `finishAll()` 全部打勾；用户停止 `stop()` 当前项标 `stopped`；`chat-error` / `token.done` 前端兜底更新。
+> - 双路径都覆盖：文本标记路径（chat-flow.ts）与原生 function call 路径（native-tools.ts 首轮探测文本解析 `[TODO:...]`）。
+
+> `step` 走"缓冲 + 广播"，兼容竞态。
+> 前端增量合并函数：`mergeStep()`（见 `src/office-web/src/components/chat/useChatPane.ts`）。
 > `reasoning` 与 `token` 均为**无 done 的增量块**：`reasoning` 独立累积到思考块，`token` 累积到正文；
 > 两者都由 `token.done=true` 或 `chat-error` 收尾。
 
@@ -49,54 +66,7 @@
 
 ---
 
-## 3. Trace / Span 数据模型
-
-### TracePayload
-
-```ts
-{
-  traceId: string;
-  sessionId: string | null;
-  rootName: string;          // 通常为 "chat"
-  startedAt: number;         // epoch ms
-  endedAt: number | null;
-  status: 'ok' | 'error';
-  spans: Span[];
-}
-```
-
-### Span
-
-```ts
-{
-  spanId: string;
-  parentSpanId: string | null;
-  traceId: string;
-  name: string;              // 如 "chat" / "llm.completion" / "tool.call"
-  kind: 'root' | 'llm' | 'tool' | 'db' | 'stream';
-  startedAt: number;
-  endedAt: number | null;    // 未结束为 null（前端显示"进行中"）
-  status: 'ok' | 'error';
-  attrs: Record<string, any>;
-}
-```
-
-### kind 语义
-
-| kind | 颜色 | 含义 | attrs 示例 |
-|------|------|------|-----------|
-| `root` | 蓝 | 本次请求根节点（chat） | `{ model, provider }` |
-| `llm` | 紫 | 一次 LLM 调用 | `{ model, provider, promptTokens, completionTokens }` |
-| `tool` | 橙 | 工具调用（搜索/抓取） | `{ tool:'search'\|'fetch', queries\|urls }` |
-| `db` | 绿 | 数据库操作 | — |
-| `stream` | 青 | 流式输出阶段 | — |
-
-> 失败段（`status==='error'`）前端标红。
-> `trace-span` 的 `phase` 为 `start` 时 `endedAt` 为 null；为 `end` 时补全 `endedAt`、`status`、`attrs`。
-
----
-
-## 4. Step（工具调用步骤）数据模型
+## 3. Step（工具调用步骤）数据模型
 
 ```ts
 {
@@ -105,7 +75,14 @@
   tool: 'search' | 'fetch' | 'fs';
   status: 'running' | 'done';   // 失败统一经 chat-error 上报
   args: string[];            // 搜索词数组 / URL 数组 / 工具参数 JSON 字符串
-  result?: string;           // 完成摘要，如 "已搜索 2 个关键词"
+  progress?: {               // 运行中逐项进度（搜索/抓取每完成一个关键词/URL 上报一次）
+    done: number;            // 已完成数量
+    total: number;           // 总数
+    item: string;            // 当前完成项（关键词 / URL）
+    ok: boolean;             // 该项是否成功
+    summary: string;         // 该项结果摘要，如 "已搜索「苹果」：3 条结果"
+  };
+  result?: string;           // 运行中为进度提示文本；完成时为**完整**结果（不再截断 200 字符）
   startedAt: number;
   endedAt?: number;
 }
@@ -115,11 +92,13 @@
   1. **原生 function call(2026-08-12 新增,优先)**：网关 `runNativeToolLoop` 带 `tools` 参数请求模型(OpenAI function calling / Anthropic tools),模型返回 `tool_calls` 时由 `executeNativeToolCall` 逐个执行并 emit `step`。工具清单:`search_web` / `fetch_page`(联网搜索启用时)+ `fs_read` / `fs_grep` / `fs_edit` / `fs_write`(工作区配置时);`tool` 字段取 `search` / `fetch` / `fs`。
   2. **文本标记(兼容回退)**：模型在回复中写入 `[SEARCH:关键词]` / `[FETCH:url]` / `[FS]...[/FS]` 标记(由 `gateway.extractSearchQueries` / `extractUrls` / `extractFsTools` 解析),当模型未走原生工具时触发。
 - 一次请求可能先后产生多个 step(搜索、抓取、文件读写,各自独立 stepId);原生工具循环最多 `MAX_TOOL_TURNS=8` 轮,超限发 `chat-error`。
-- 前端在助手回答**之前**渲染 `ToolSteps` 卡片：spinner → ✓,可展开看 `args` / `result`;`tool='fs'` 用文件图标,`search`/`fetch` 用搜索/地球图标。
+- 前端在助手回答**之前**渲染过程面板（`ProcessPanel` 内嵌 `ToolCallStream` 流式卡片）：
+  运行中展示「具体在干什么」（解析 args 为友好动作行，多个关键词/URL 逐项打勾 + 进度条），
+  完成 ✓ + 耗时，可展开看**完整**参数与结果；`tool='fs'` 用文件图标,`search`/`fetch` 用搜索/地球图标。
 
 ---
 
-## 5. HTTP API 一览
+## 4. HTTP API 一览
 
 基础前缀 `/api`。完整实现见 `src/office-server/routes/api.ts`。
 
@@ -127,7 +106,6 @@
 |------|------|------|
 | POST | `/chat` | 发起对话，`body:{text,sessionId?,source?,temperature?,providerId?,model?,resend?}`，返回 `{sessionId}` |
 | GET | `/stream?sessionId=` | SSE 实时通道（见上） |
-| GET | `/traces?sessionId=` | 回查该会话最近 20 条 Trace（含嵌套 spans） — **待删除**（前端已走 SSE 实时通道，无人调用） |
 | GET | `/status` | `{ hasProviders }` |
 | GET/PUT | `/model` | 当前选中模型 / 切换 |
 | GET | `/model-options` | 可选模型列表 |
@@ -146,16 +124,15 @@
 
 ---
 
-## 6. 前端消费约定
+## 5. 前端消费约定
 
 - 所有 API 走**相对路径** `/api/...`（生产态与 Express 同源；开发态经 Vite dev `proxy` 转发到 :18791）。
 - 单例 `EventSource('/api/stream?sessionId=' + sid)` 接收全部事件；按 `type` 分发到上文各处理器。
-- 增量事件（`trace-start`/`trace-span`/`step`）用 `useReducer`/函数式 `setState` 合并，保证实时绘制无闪烁。
-- 请求开始（`trace-start`）默认自动展开 Trace 面板；用户手动关闭后不再自动弹（头部 Trace 图标仍可随时点开）。
+- 增量事件（`step`）用函数式 `setState` 合并（`mergeStep`），保证实时绘制无闪烁。
 
 ---
 
-## 7. 前端渲染映射（事件 → 组件）
+## 6. 前端渲染映射（事件 → 组件）
 
 后端只管"切事件"，前端按 `type` 渲染富组件——这是 studentbuddy 能复刻 WorkBuddy / OpenCode 级别回复效果的关键。
 映射集中在 `src/office-web/src/pages/ChatPage.tsx`，消费点见各 `if (d.type === ...)` 分支。
@@ -163,30 +140,29 @@
 | 事件 | 累积状态 | 组件 | 渲染行为 |
 |------|---------|------|---------|
 | `reasoning` | `reasoning:string`（函数式 `setReasoning(prev => prev + content)`）| `ReasoningBlock`（可折叠「思考过程」）| 实时增长；仅当 `reasoning.length>0` 时显示；`token.done` 后停止增长 |
-| `step` | `steps:any[]`（函数式合并 `mergeStep()`）| `ToolSteps` 卡片 | 渲染在正文**之前**：`running` 显示 spinner，`done` 显示 ✓，可展开看 `args`/`result` |
+| `step` | `steps:any[]`（函数式合并 `mergeStep()`）| `ProcessPanel` → `ToolCallStream` 流式工具卡片 | 过程式：运行中逐项打勾 + 进度条 + 参数预览，`done` ✓ + 耗时，展开看完整 args/result |
 | `artifact` | 由独立 `previewClient` 经通配订阅 `*` 处理（主通道 `return` 跳过）| 文件视图 `mc-filecard` + 预览面板 | 与 `PreviewPage` 同源；新 artifact 进入文件列表，可点开预览 |
 
 > **预览 iframe 的 sandbox 按来源分级**（见 `src/shared/preview-types.ts` `previewSandbox`）：
 > - 可信来源（`ai` 本地 AI 产出 / `user` 用户编写）：`allow-scripts allow-same-origin allow-forms allow-popups allow-modals`——localStorage、同源 fetch、表单、弹窗、alert 均可用，对齐 WorkBuddy 预览能力。
 > - 不可信来源（`import` 外部导入）：回退到 `allow-scripts`（不透明源），防止恶意 HTML 与 studentbuddy 主程序同源后读取 app 的 localStorage（OAuth / API key 等）。
 | `token` | `m.content:string`（本轮完整正文）| `MarkdownStream` | **真正的流式 Markdown**：按块（标题/段落/代码/列表/表格/引用）切分，稳定 key 防重播，仅新增块淡入 + 末尾 caret；代码块轻量语法高亮（`.mc-kw`/`.mc-ty`）|
-| `trace-start`/`trace-span`/`trace` | `trace` 状态（函数式 `mergeTraceSpan()`）| Trace 面板 | 请求开始自动展开，标出各 Span 耗时/状态，失败段标红 |
 | `chat-error` | `m.error` | 错误条 | 终止本轮，思考块/工具卡片冻结，正文区显示错误 |
 
 ### 渲染层契约要点（对接正式版必须保持）
 
 1. **正文是 Markdown，不是纯文本**。任何新前端形态（Web / 移动壳）都必须用 Markdown 渲染器消费 `token.content`，否则会退化成"哑"纯文本流。
 2. **稳定 key 分块**：流式累积文本时按"块"而非"行"做稳定 key，已渲染块内容不变则不重绘，避免重播闪烁。studentbuddy 的 `MarkdownStream` 用块索引做 key。
-3. **增量合并**：`reasoning`/`token` 用函数式 setState 累积；`step`/`trace` 用专用 merge 函数保证实时无闪烁。
+3. **增量合并**：`reasoning`/`token` 用函数式 setState 累积；`step` 用专用 merge 函数保证实时无闪烁。
 4. **artifact 走独立通道**：`previewClient` 通配订阅所有会话，与主聊天 SSE 解耦，保证预览面板在任意会话/分栏下都能收到。
 
 ---
 
-## 8. 文件工程能力（对标 OpenCode / Cursor 的「工作区」）
+## 7. 文件工程能力（对标 OpenCode / Cursor 的「工作区」）
 
 studentbuddy 通过「沙箱文件工具 + 工作区浏览器」补齐 AI IDE 的文件读写/编辑/搜索能力。所有文件操作被严格限制在配置的**工作区根目录**内（`fs-tools.resolveSafe` 拦截一切越界），杜绝 AI 伪造请求或越权访问。
 
-### 8.1 文件工具循环（gateway 侧）
+### 7.1 文件工具循环（gateway 侧）
 
 当「联网搜索启用 **或** 已配置工作区」时，走统一的**规划阶段 → 执行工具 → 最终阶段**：
 
@@ -203,7 +179,7 @@ studentbuddy 通过「沙箱文件工具 + 工作区浏览器」补齐 AI IDE �
 
 系统提示词（`buildSystemPrompt`）在检测到工作区时会自动注入上述文件工具说明，模型据此产出 `[FS]` 块而无需前端干预。
 
-### 8.2 SSE 事件：`file-change`
+### 7.2 SSE 事件：`file-change`
 
 | 字段 | 含义 |
 |------|------|
@@ -216,7 +192,7 @@ studentbuddy 通过「沙箱文件工具 + 工作区浏览器」补齐 AI IDE �
 
 广播机制：同时推给对应会话与通配订阅者（`sessionId=*`），前端 `WorkspaceExplorer` 跨会话订阅，变更卡片在任意分栏都能出现。
 
-### 8.3 文件系统 REST API（`/api/fs/*` + `/api/workspace`）
+### 7.3 文件系统 REST API（`/api/fs/*` + `/api/workspace`）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -227,7 +203,7 @@ studentbuddy 通过「沙箱文件工具 + 工作区浏览器」补齐 AI IDE �
 | GET | `/api/fs/grep?pattern=&path=` | 正则文本搜索（限 80 处、跳过二进制）|
 | POST | `/api/fs/revert` | 撤销某次变更（`{changeId}`，调用 `fsRevert`）|
 
-### 8.4 前端消费
+### 7.4 前端消费
 
 - **工作区浏览器**（`WorkspaceExplorer`）：在文件视图的「工作区」子页。顶部可设置/更改工作区根目录；下方可展开目录树、点击读取文件预览、把文件提示「发给对话」；底部「文件变更」卡片展示 AI 改动的行级 diff 与「撤销」按钮。
 - 变更卡片的 diff 由前端 `lcsLineDiff` 计算（红=删除、绿=新增），撤销走 `/api/fs/revert` 后从列表移除。

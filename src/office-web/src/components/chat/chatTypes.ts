@@ -1,6 +1,6 @@
 import { CSSProperties } from 'react';
 
-/** 会话行（侧边栏列表） */
+/** 会话行（侧边栏列表）；含子对话树字段（parent_id/root_id，无父则为根） */
 export interface Session {
   id: string;
   title: string;
@@ -8,6 +8,14 @@ export interface Session {
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;
+  parent_id?: string | null;
+  root_id?: string | null;
+}
+
+/** 会话树节点（/api/sessions/tree 返回：根 + children + depth） */
+export interface SessionNode extends Session {
+  depth: number;
+  children: SessionNode[];
 }
 
 /** 打开/新建窗格的请求（pane A/B + sessionId + nonce） */
@@ -77,7 +85,6 @@ export interface ChatPaneProps {
   focused: boolean;
   view: 'chat' | 'files';
   openReq: OpenReq | null;
-  initialSearchOn: boolean;
   sessions: Session[];
   modelOptions: ModelOption[];
   selectedModel: SelectedModel | null;
@@ -86,7 +93,6 @@ export interface ChatPaneProps {
   onViewChange: (v: 'chat' | 'files') => void;
   onPaneSessionKnown: (id: string | null) => void;
   onSessionsMutated: () => void;
-  onOpenPreview?: (html: string) => void;
   onToast?: (msg: string) => void;
   runningSessionIds?: string[];
   style?: CSSProperties;

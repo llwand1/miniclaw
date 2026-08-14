@@ -158,6 +158,39 @@ describe('adapter/openai-compatible', () => {
     expect(tc?.finishReason).toBe('tool_calls');
   });
 
+  it('ADP-08 tool loop 回灌消息序列化:tool_call_id + assistant tool_calls 线上格式', async () => {
+    const resp = sseResponse(['data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}', 'data: [DONE]']);
+    const fetchMock = vi.fn().mockResolvedValue(resp);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new OpenAICompatibleAdapter();
+    await collect(adapter.chat(makeReq({
+      messages: [
+        { role: 'user', content: '查天气' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'search_web', arguments: '{"queries":["天气"]}' }] },
+        { role: 'tool', toolCallId: 'call_1', content: '晴,25°C' },
+      ],
+    })));
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    // assistant 消息:toolCalls 转为 OpenAI tool_calls 线上格式
+    const assistant = body.messages[1];
+    expect(assistant.role).toBe('assistant');
+    expect(assistant.toolCalls).toBeUndefined();
+    expect(assistant.tool_calls).toHaveLength(1);
+    expect(assistant.tool_calls[0]).toEqual({
+      id: 'call_1',
+      type: 'function',
+      function: { name: 'search_web', arguments: '{"queries":["天气"]}' },
+    });
+    // tool 消息:toolCallId 转为 tool_call_id
+    const tool = body.messages[2];
+    expect(tool.role).toBe('tool');
+    expect(tool.tool_call_id).toBe('call_1');
+    expect(tool.content).toBe('晴,25°C');
+  });
+
   it('ADP-07 未传 tools 时不带 tools 参数(兼容纯文本标记路径)', async () => {
     const resp = sseResponse(['data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}', 'data: [DONE]']);
     const fetchMock = vi.fn().mockResolvedValue(resp);

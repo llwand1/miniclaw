@@ -10,7 +10,6 @@ export const IconSearch = () => svg(14, <><circle cx="12" cy="12" r="9" /><line 
 export const IconThink = () => svg(13, <><circle cx="12" cy="12" r="9" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></>);
 export const IconCaret = () => svg(11, <path d="M6 9l6 6 6-6" />, 2.5);
 export const IconContext = () => svg(14, <><line x1="4" y1="20" x2="4" y2="13" /><line x1="10" y1="20" x2="10" y2="8" /><line x1="16" y1="20" x2="16" y2="11" /><line x1="22" y1="20" x2="22" y2="4" /></>);
-export const IconTrace = () => svg(14, <><circle cx="5" cy="6" r="2" /><circle cx="19" cy="12" r="2" /><circle cx="5" cy="18" r="2" /><path d="M7 6h6a2 2 0 0 1 2 2v2" /><path d="M7 18h6a2 2 0 0 0 2-2v-2" /></>);
 export const IconTool = () => svg(14, <><path d="M14.7 6.3a4 4 0 0 0-5.4-5.4L3 10l-1 5 5-1 7.7-7.7z" /></>);
 export const IconGlobe = () => svg(14, <><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z" /></>);
 export const IconCheck = () => svg(13, <><polyline points="20 6 9 17 4 12" /></>);

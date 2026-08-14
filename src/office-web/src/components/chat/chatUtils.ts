@@ -1,26 +1,6 @@
 import { CTX_LIMIT_FALLBACK } from './chatStyles';
 import type { ServerCtx } from './chatTypes';
 
-/** 把一次 SSE 增量（span 的 start/end）合并进当前 trace 对象（实时边收边画） */
-export function mergeTraceSpan(trace: any, _phase: string, span: any): any {
-  if (!trace) return { traceId: span?.traceId || '', sessionId: null, rootName: '', startedAt: span?.startedAt || Date.now(), endedAt: null, status: 'ok', spans: [span] };
-  const spans = Array.isArray(trace.spans) ? trace.spans.slice() : [];
-  const idx = spans.findIndex((s: any) => s.spanId === span.spanId);
-  if (idx >= 0) spans[idx] = { ...spans[idx], ...span };
-  else spans.push(span);
-  return { ...trace, spans };
-}
-
-/** Trace span 属性格式化为多行文本（用于展开详情） */
-export function formatAttrs(attrs: any): string {
-  if (!attrs || typeof attrs !== 'object') return String(attrs ?? '');
-  const out: string[] = [];
-  for (const [k, v] of Object.entries(attrs)) {
-    out.push(`${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`);
-  }
-  return out.join('\n');
-}
-
 /** 把一次 SSE 增量 step（running→done/error）合并进当前 steps 列表（实时累积） */
 export function mergeStep(steps: any[], step: any): any[] {
   if (!step || !step.stepId) return steps || [];

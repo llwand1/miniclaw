@@ -41,23 +41,4 @@ export function registerPreview(r: Router): void {
       res.json({ ok: true });
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
-
-  // 简易 Trace：查询某会话最近若干次请求的调用瀑布（刷新/回看用）
-  r.get('/traces', (req: Request, res: Response) => {
-    try {
-      const sid = (req.query.sessionId as string) || '';
-      const db = getDb();
-      const traces = db.prepare('SELECT * FROM traces WHERE session_id=? ORDER BY started_at DESC LIMIT 20').all(sid) as any[];
-      const out = traces.map((t: any) => {
-        const spans = db.prepare('SELECT * FROM spans WHERE trace_id=? ORDER BY started_at ASC').all(t.trace_id) as any[];
-        return {
-          ...t,
-          spans: spans.map((s: any) => ({ ...s, attrs: JSON.parse(s.attrs || '{}') })),
-        };
-      });
-      res.json({ traces: out });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
 }

@@ -2,7 +2,6 @@ import { LLMAdapter, TokenChunk, ChatMessage, ToolDefinition } from '../adapter/
 import { OpenAICompatibleAdapter } from '../adapter/openai-compatible';
 import { AnthropicAdapter } from '../adapter/anthropic';
 import { createLogger } from '../logger';
-import { tracer } from '../trace/tracer';
 const log = createLogger('agent');
 
 export interface AgentConfig {
@@ -54,15 +53,6 @@ export class AgentEngine {
     signal?: AbortSignal,
     tools?: ToolDefinition[],
   ): AsyncIterable<TokenChunk> {
-    // 简易 Trace：把本次 LLM 调用作为当前 Trace 的子 Span（从 gateway 注入的上下文取）
-    const trace = tracer.active();
-    const span = trace?.startChild('llm.completion', 'llm', {
-      model: agent.model || provider.defaultModel,
-      provider: provider.type,
-    });
-    let promptTokens = 0;
-    let completionTokens = 0;
-
     try {
       const adapter = this.adapters.get(provider.type);
       if (!adapter) {
@@ -89,19 +79,12 @@ export class AgentEngine {
       });
 
       for await (const chunk of stream) {
-        if (chunk.usage) {
-          promptTokens += chunk.usage.promptTokens || 0;
-          completionTokens += chunk.usage.completionTokens || 0;
-        }
         yield chunk;
       }
 
       log.info('Chat completed');
     } catch (e: any) {
-      span?.setError(e?.message);
       throw e;
-    } finally {
-      span?.end({ promptTokens, completionTokens });
     }
   }
 }

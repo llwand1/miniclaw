@@ -40,10 +40,6 @@ export interface SessionLiveState {
   todos: LiveTodo[];
   /** 思考/推理内容（增量拼接）。 */
   reasoning: string;
-  /** 最近一次完整 trace payload（校准用）；span 增量见 traceSpans。 */
-  trace: any | null;
-  /** 累积的 trace span 增量（前端瀑布实时回放）。 */
-  traceSpans: any[];
   startedAt: number;
   endedAt: number | null;
   error: string | null;
@@ -61,8 +57,6 @@ export class SessionStateStore {
         steps: [],
         todos: [],
         reasoning: '',
-        trace: null,
-        traceSpans: [],
         startedAt: Date.now(),
         endedAt: null,
         error: null,
@@ -103,18 +97,6 @@ export class SessionStateStore {
     if (!content) return;
     const s = this.ensure(sessionId);
     s.reasoning += content;
-  }
-
-  /** 记录 trace 增量 span（前端瀑布边收边画）。 */
-  pushTraceSpan(sessionId: string, span: any): void {
-    const s = this.ensure(sessionId);
-    s.traceSpans.push(span);
-  }
-
-  /** 记录完整 trace payload（请求结束校准）。 */
-  setTrace(sessionId: string, trace: any): void {
-    const s = this.ensure(sessionId);
-    s.trace = trace;
   }
 
   /** 会话结束（done/error）。 */

@@ -1,6 +1,33 @@
-import { LLMAdapter, ChatRequest, TokenChunk, ToolCall, ModelListRequest } from './types';
+import { LLMAdapter, ChatRequest, TokenChunk, ToolCall, ChatMessage, ModelListRequest } from './types';
 import { createLogger } from '../logger';
 const log = createLogger('adapter:openai');
+
+/**
+ * 内部 ChatMessage → OpenAI 线上格式:
+ * assistant 的 toolCalls(驼峰)→ tool_calls(id/type/function.name/function.arguments);
+ * tool 角色的 toolCallId(驼峰)→ tool_call_id。其余角色原样透传。
+ */
+function toOpenAIMessages(messages: ChatMessage[]): Record<string, unknown>[] {
+  return messages.map((m) => {
+    if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+      return {
+        role: 'assistant',
+        // 空串而非 null:部分 OpenAI 兼容网关拒绝 content:null(要求 string),
+        // 空字符串在 OpenAI 及各家兼容服务上均合法(配合 tool_calls 一起发送)。
+        content: m.content || '',
+        tool_calls: m.toolCalls.map((tc: ToolCall) => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: tc.arguments },
+        })),
+      };
+    }
+    if (m.role === 'tool') {
+      return { role: 'tool', tool_call_id: m.toolCallId, content: m.content };
+    }
+    return { role: m.role, content: m.content };
+  });
+}
 
 export class OpenAICompatibleAdapter implements LLMAdapter {
   type: 'openai' = 'openai';
@@ -25,7 +52,7 @@ export class OpenAICompatibleAdapter implements LLMAdapter {
     try {
       const body: Record<string, unknown> = {
         model: req.model,
-        messages: req.messages,
+        messages: toOpenAIMessages(req.messages),
         temperature: req.temperature ?? 0.7,
         stream: true,
         // 要求流式返回 usage（OpenAI 兼容服务商默认不返回，需显式开启），
