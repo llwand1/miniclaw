@@ -70,6 +70,8 @@ function dpapiUnprotect(wrapped: Buffer): Buffer | null {
 
 后果：主密钥以 0600 明文落盘，`providers.api_key`、OAuth token 的 AES-256-GCM 加密形同虚设——拿到 DB + `.mk` 即可解密全部密钥。注释虽坦承"退化为文件明文"，但与文档宣称的 DPAPI 绑定存在实质落差。修复路径：接入 Electron `safeStorage`（主进程），或用 `node-ffi-napi`/`koffi` 调 `CryptProtectData`。
 
+> ✅ **已修复（2026-08-13）**：`crypto.ts` 现通过 Windows 自带 PowerShell 的 `System.Security.Cryptography.ProtectedData`（即 CryptProtectData/CryptUnprotectData，`DataProtectionScope.CurrentUser`）真实包装主密钥，与当前 Windows 用户绑定；旧版明文 `.mk`（32 字节）启动时自动迁移并重新用 DPAPI 包装，既有密文不丢；Windows 上 DPAPI 意外失败时主密钥仅存内存（不退回明文），非 Windows 平台如实退化为密钥文件隔离存储。实际影响比原评估更严重的一点已一并修正：`.mk` 与 `studentbuddy.db` 同目录（`%APPDATA%/studentbuddy/`），且 Windows 上 `mode:0o600` 无效，原"拷走 DB 时 .mk 不会跟着走"的降级理由并不成立。
+
 ### 2. 工具调用靠提示标记，非原生 function-calling
 
 工具编排（搜索、抓取、记忆、澄清、技能、记忆沉淀）全部靠模型在回复中写 `[SEARCH:关键词]`、`[FETCH:url]`、`<<MEM:profile,recent>>`、`[TODO:...]`、`[ASK:{json}]`、`[MEMO:内容|A/B/C]` 等标记触发，网关再解析执行。这是"能跑就行"式的取舍：实现简单，但完全依赖模型遵守格式，模型不配合就静默失效，且无法做参数类型校验。OpenAI / Anthropic 均已提供原生 function-calling / tool-use，迁移后健壮性提升一个量级。
@@ -123,7 +125,7 @@ vibe coding 项目普遍有几大死穴，本项目恰好在每一项上都做�
 
 想从高档顶到纯顶档、撑得住资深岗的技术深挖，按以下顺序补：
 
-1. **DPAPI 真正落地**——接入 Electron `safeStorage` 或 `koffi` 调 `CryptProtectData`，让密钥加密名实相符。这是当前最大的"设计与实现落差"，资深面试官一句"你这个加密怎么是明文"就会露怯。
+1. ~~DPAPI 真正落地~~ ✅ 已修复（2026-08-13）：`crypto.ts` 用 Windows 自带 PowerShell 的 `ProtectedData`（CurrentUser）真实调用 CryptProtectData，含旧明文 `.mk` 自动迁移，既有密文不丢；新增 SEC-08（迁移+重启往返）、SEC-09（.mk 为 DPAPI blob）两个用例。
 2. **工具调用迁到原生 function-calling**——替换 `[SEARCH:]`/`<<MEM:>>` 等提示标记，改用 OpenAI tools / Anthropic tool_use，获得参数校验与稳定触发。
 3. **前端拆分 + 补测试**——`ChatPane.tsx`、`SettingsPage.tsx` 按职责拆分，关键交互补 Vitest + Testing Library 覆盖。
 
