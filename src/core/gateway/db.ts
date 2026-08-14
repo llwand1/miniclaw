@@ -280,6 +280,23 @@ function migrate(database: Database.Database): void {
     );
   `);
 
+  // 背背背：记忆词条 / 专有名词。term 为要记的词条，definition 为释义/解释，category 为分类（如单词/术语/人名），
+  // difficulty 为背诵难度（0-2：易/中/难，前端默认 1），review_count 为已复习次数，last_review_at 为上次复习时间，
+  // mastered 标记是否已掌握（前端「背背背」背诵模式按记忆度推进）。
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS memorize (
+      id TEXT PRIMARY KEY,
+      term TEXT NOT NULL,
+      definition TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT '单词',
+      difficulty INTEGER NOT NULL DEFAULT 1,
+      review_count INTEGER NOT NULL DEFAULT 0,
+      mastered INTEGER NOT NULL DEFAULT 0,
+      last_review_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   // 会话置顶 / 软删除：对已有库非破坏性地补列（幂等）
   const sessionCols = (database.prepare('PRAGMA table_info(sessions)').all() as any[]).map((c) => c.name);
   if (!sessionCols.includes('pinned')) {

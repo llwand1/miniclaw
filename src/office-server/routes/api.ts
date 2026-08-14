@@ -5,6 +5,7 @@ import { registerAuth } from './auth';
 import { registerChat } from './chat';
 import { registerFiles } from './files';
 import { registerMemories } from './memories';
+import { registerMemorize } from './memorize';
 import { registerPreview } from './preview';
 import { registerProviders } from './providers';
 import { registerSecurity } from './security';
