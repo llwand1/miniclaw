@@ -1,29 +1,50 @@
 import { Router, Request, Response } from 'express';
 import { getDb } from '../../core/gateway/db';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { Gateway } from '../../core/gateway';
 import { AgentConfig } from '../../core/agent';
-import { getProviderById, getSelectedModel, getDefaultProvider } from '../../core/gateway/providers';
+import { getProviderById, getSelectedModel, getDefaultProvider, loadSkillBodies } from '../../core/gateway/providers';
+import { extractText, UPLOADS_DIR } from '../../core/upload';
 import { createLogger } from '../../core/logger';
 
 const log = createLogger('api:quiz');
 
-/** 题库路由：AI 生成 / 手动导入的选择题组 CRUD。
- *  data 结构 = QuizData：{ title?: string; questions: { type?, question, options, answer?, explanation?, solution? }[] }
+/** 题库路由：AI 生成 / 手动导入的练习题组 CRUD（选择题 / 填空题 / 解答题）。
+ *  data 结构 = QuizData：{ title?: string; questions: { type?, question, options?, answer?, explanation?, solution? }[] }
+ *  type: single/multiple=选择题(必须 options)、fill=填空题(答案数组按空位顺序)、essay=解答题(answer=参考答案要点, solution=完整解答)。
  */
 export function registerQuiz(r: Router, gw: Gateway): void {
+  // 清洗每题 source 来源字段：kind 仅 web/ai，title/url 截断为字符串，非法则置为 AI 原创
+  function sanitizeSource(q: any): any {
+    const src = q && q.source;
+    if (!src || typeof src !== 'object') return { kind: 'ai', title: 'AI 原创' };
+    const kind = src.kind === 'web' ? 'web' : 'ai';
+    const title = typeof src.title === 'string' && src.title.trim() ? src.title.trim().slice(0, 200) : (kind === 'web' ? '网络题目' : 'AI 原创');
+    const url = typeof src.url === 'string' && src.url.trim().startsWith('http') ? src.url.trim().slice(0, 500) : undefined;
+    return url ? { kind, title, url } : { kind, title };
+  }
+
   // 校验并规范化一条 QuizData；非法返回 null
   function normalize(data: any): { title: string; questions: any[] } | null {
     if (!data || typeof data !== 'object') return null;
     const qs = Array.isArray(data.questions) ? data.questions : null;
     if (!qs || qs.length === 0) return null;
+    const clean: any[] = [];
     for (const q of qs) {
       if (!q || typeof q.question !== 'string' || !q.question.trim()) return null;
-      if (!q.options || typeof q.options !== 'object') return null;
-      const keys = Object.keys(q.options);
-      if (keys.length === 0) return null;
+      const type = typeof q.type === 'string' ? q.type : 'single';
+      // 选择题必须带 options；填空题/解答题不要求 options
+      if (type !== 'fill' && type !== 'essay') {
+        if (!q.options || typeof q.options !== 'object') return null;
+        const keys = Object.keys(q.options);
+        if (keys.length === 0) return null;
+      }
+      // 来源字段清洗：无 source 的题目默认标注 AI 原创
+      clean.push({ ...q, source: sanitizeSource(q) });
     }
-    return { title: typeof data.title === 'string' ? data.title.trim().slice(0, 200) : '', questions: qs };
+    return { title: typeof data.title === 'string' ? data.title.trim().slice(0, 200) : '', questions: clean };
   }
 
   // 从 [QUIZ]...[/QUIZ] 文本里解析出 QuizData；失败返回 null
@@ -116,6 +137,105 @@ export function registerQuiz(r: Router, gw: Gateway): void {
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
+  // ─── AI 导入：用户发来文件/文本 → 调 LLM 按 quiz-generator 协议解析为 [QUIZ] → 校验入库。
+  // body: { path?: 上传暂存文件路径(来自 /api/files/upload), text?: 直接文本内容, title?: 标题 }
+  // 返回 { imported, items }（与 /quiz-bank/import 一致）
+  r.post('/quiz-bank/ai-import', async (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const filePath = typeof body.path === 'string' ? body.path.trim() : '';
+      const rawText = typeof body.text === 'string' ? body.text.trim() : '';
+      const title = typeof body.title === 'string' ? body.title.trim().slice(0, 200) : '';
+
+      // 1) 取内容：优先文件路径（安全校验必须位于上传目录内），其次直接文本
+      let content = rawText;
+      let fileName = '';
+      if (!content && filePath) {
+        const abs = path.resolve(filePath);
+        const uploadsRoot = path.resolve(UPLOADS_DIR);
+        if (abs !== uploadsRoot && !abs.startsWith(uploadsRoot + path.sep)) {
+          return res.status(400).json({ error: '文件路径不合法：仅允许读取上传目录内的文件' });
+        }
+        if (!fs.existsSync(abs)) {
+          return res.status(400).json({ error: '文件不存在或已过期，请重新上传' });
+        }
+        fileName = path.basename(abs);
+        // 优先读上传时已提取的伴生 .txt；缺失则按扩展名实时提取
+        const txtPath = abs + '.txt';
+        if (fs.existsSync(txtPath)) {
+          content = fs.readFileSync(txtPath, 'utf-8');
+        } else {
+          const ext = path.extname(abs).slice(1).toLowerCase();
+          content = (await extractText(abs, ext)) || '';
+        }
+        content = content.trim();
+        if (!content) {
+          return res.status(400).json({ error: '无法从文件中提取文本（格式不支持或内容为空），请换文本方式导入' });
+        }
+      }
+      if (!content) {
+        return res.status(400).json({ error: '请提供文件（path）或文本（text）内容' });
+      }
+      // 防爆上下文：截断超长内容
+      const MAX_CHARS = 120_000;
+      if (content.length > MAX_CHARS) content = content.slice(0, MAX_CHARS) + '\n…（内容过长已截断）';
+
+      // 2) 解析当前 provider/model（与题解/分析一致）
+      let provider = null as any;
+      let chosenModel: string | null = null;
+      const selected = getSelectedModel();
+      if (selected) {
+        provider = getProviderById(selected.providerId);
+        chosenModel = selected.model;
+      }
+      if (!provider) provider = getDefaultProvider();
+      if (!provider) return res.status(400).json({ error: '请先在设置页添加 API 服务商' });
+
+      const model = chosenModel || provider.defaultModel;
+      const agent: AgentConfig = {
+        id: 'default', name: '题库导入助手', role: 'assistant',
+        providerId: provider.id, model, enabled: true,
+        systemPrompt: '你是 studentbuddy 的题库导入助手。用户会发来一份学习资料/题目文档的文本，请把它解析为结构化练习题组，严格按 [QUIZ] JSON 协议输出，不要输出多余文字。',
+      };
+
+      // 3) 注入 quiz-generator 技能正文（保证协议一致）+ 用户内容 → 调 LLM
+      const skillBody = loadSkillBodies(['quiz-generator']);
+      const promptLines = [
+        '请把下面这份资料中的题目解析为一组练习题，严格使用 [QUIZ] JSON 格式输出。',
+        '',
+        '要求：',
+        '- 从资料中识别出题目；资料里没有现成题目的知识点内容，可基于知识点自创适量练习题（来源标注 AI 原创）。',
+        '- 支持三种题型：选择题(type=single/multiple，必须 options)、填空题(type=fill，题干用 ____ 占位)、解答题(type=essay，answer 放参考答案要点、solution 放完整解答)。',
+        '- 每题尽量给出 answer（正确答案/参考答案）与 explanation（解析）；解答题还要有 solution（完整解答）。',
+        '- 每题标注来源 source：资料原文题目标 {"kind":"web","title":"资料名称"}；AI 自创题标 {"kind":"ai","title":"AI 原创"}。',
+        '- 题目数量：资料里有多少题就解析多少题；资料无题则出 4 题（2 选择 + 1 填空 + 1 解答）。',
+        '- 只输出 [QUIZ] 包裹的合法 JSON，不要输出题解之外的多余文字。',
+        '',
+      ];
+      if (title || fileName) promptLines.push(`资料标题：${title || fileName}`, '');
+      promptLines.push('资料内容：', content);
+      promptLines.push('');
+      promptLines.push('以下为 quiz-generator 技能协议，请严格遵循其格式：');
+      promptLines.push(skillBody || '（技能正文不可用，请按上方要求输出 [QUIZ] JSON）');
+
+      const { text } = await gw.generateOnce(provider, agent, [{ role: 'user', content: promptLines.join('\n') }], 0.3);
+
+      // 4) 解析 [QUIZ] → 校验 → 入库
+      const parsed = parseQuizText(text || '');
+      if (!parsed) return res.status(400).json({ error: 'AI 未能解析出有效题目，请重试或检查资料格式' });
+      const norm = normalize(parsed);
+      if (!norm) return res.status(400).json({ error: 'AI 解析结果无效：未包含合法 questions 数组' });
+      const id = `qz-${crypto.randomUUID()}`;
+      const finalTitle = (norm.title || title || fileName || 'AI 导入题库').trim().slice(0, 200);
+      getDb().prepare("INSERT INTO quiz_bank (id,title,data,source) VALUES (?,?,?,?)")
+        .run(id, finalTitle, JSON.stringify(norm), 'import');
+      res.json({ imported: 1, items: [{ id, title: finalTitle, question_count: norm.questions.length }] });
+    } catch (err: any) {
+      log.error({ error: err.message }, 'Quiz AI import failed');
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ─── 详细题解：做题完成后的可选环节。
   // 接收题目组 + 用户作答（可选，用于针对性讲解做错的题），调 LLM 生成逐题详细题解，
   // 返回 { solutions: string[] }（每题一段 Markdown 讲解）。
@@ -140,15 +260,15 @@ export function registerQuiz(r: Router, gw: Gateway): void {
       const agent: AgentConfig = {
         id: 'default', name: '题解助手', role: 'assistant',
         providerId: provider.id, model, enabled: true,
-        systemPrompt: '你是 studentbuddy 的题解老师。用户做完一组选择题后，你要针对每道题给出详细讲解：先判断对错，再讲清考点、正确选项为什么对、错误选项为什么错（结合用户作答重点讲错因），最后给出举一反三的提示。语言通俗、结构清晰。',
+        systemPrompt: '你是 studentbuddy 的题解老师。用户做完一组练习题（选择题/填空题/解答题）后，你要针对每道题给出详细讲解：先判断对错，再讲清考点、正确答案为什么对（填空题给出空位答案的依据，解答题讲清解题步骤与关键点；结合用户作答重点讲错因），最后给出举一反三的提示。语言通俗、结构清晰。',
       };
 
       // 组装题解请求：题目 + 用户作答（按题号索引）
       const lines: string[] = [];
-      lines.push('请为下面这组选择题逐题生成【详细题解】。每题讲解请包含：');
+      lines.push('请为下面这组练习题（可能含选择题/填空题/解答题）逐题生成【详细题解】。每题讲解请包含：');
       lines.push('1. 考点（这题考什么知识点）');
-      lines.push('2. 正确选项为什么对（必要时给出推导/步骤）');
-      lines.push('3. 错误选项为什么错（若用户该题答错，请重点分析用户选的选项错在哪里）');
+      lines.push('2. 正确答案为什么对（选择题说明正确选项依据；填空题说明空位答案依据；解答题给出完整解题步骤）');
+      lines.push('3. 用户错在哪里（若用户该题答错，请重点分析错因；解答题对照参考答案要点指出遗漏/偏差）');
       lines.push('4. 举一反三提示（1 句即可）');
       lines.push('');
       if (norm.title) lines.push(`题目组：${norm.title}`);
@@ -158,9 +278,9 @@ export function registerQuiz(r: Router, gw: Gateway): void {
         const ansTxt = Array.isArray(q.answer) && q.answer.length ? q.answer.join('、') : '（未提供）';
         const userTxt = answers && Array.isArray(answers[i]) && answers[i].length ? answers[i].join('、') : '（未作答）';
         lines.push('');
-        lines.push(`第${i + 1}题：${q.question}`);
-        lines.push(`选项：${optTxt}`);
-        lines.push(`正确答案：${ansTxt}`);
+        lines.push(`第${i + 1}题（${q.type === 'fill' ? '填空题' : q.type === 'essay' ? '解答题' : '选择题'}）：${q.question}`);
+        if (optTxt) lines.push(`选项：${optTxt}`);
+        lines.push(`正确答案${q.type === 'essay' ? '（参考答案要点）' : ''}：${ansTxt}`);
         lines.push(`用户作答：${userTxt}`);
       });
       lines.push('');
@@ -199,12 +319,12 @@ export function registerQuiz(r: Router, gw: Gateway): void {
       const agent: AgentConfig = {
         id: 'default', name: '学习分析助手', role: 'assistant',
         providerId: provider.id, model, enabled: true,
-        systemPrompt: '你是 studentbuddy 的学习分析老师。根据用户做完一组选择题的作答情况，诊断其知识薄弱点，并给出针对性建议。只输出 JSON，不要输出多余文字。',
+        systemPrompt: '你是 studentbuddy 的学习分析老师。根据用户做完一组练习题（选择题/填空题/解答题）的作答情况，诊断其知识薄弱点，并给出针对性建议。只输出 JSON，不要输出多余文字。',
       };
 
       // 组装分析请求：题目 + 用户作答 + 逐题对错标注
       const lines: string[] = [];
-      lines.push('请根据下面这组选择题的用户作答，诊断知识薄弱点并输出 JSON 分析报告。');
+      lines.push('请根据下面这组练习题（选择题/填空题/解答题）的用户作答，诊断知识薄弱点并输出 JSON 分析报告。');
       lines.push('');
       lines.push('输出 JSON 结构（严格遵循，字段名英文）：');
       lines.push('{');
@@ -224,15 +344,29 @@ export function registerQuiz(r: Router, gw: Gateway): void {
           .map(([k, v]) => `${k}. ${v}`).join('　');
         const ansTxt = Array.isArray(q.answer) && q.answer.length ? q.answer.join('、') : '（未提供）';
         const userTxt = answers && Array.isArray(answers[i]) && answers[i].length ? answers[i].join('、') : '（未作答）';
-        const correct = Array.isArray(q.answer) && q.answer.length > 0
-          && Array.isArray(answers && answers[i])
-          && (answers[i] as string[]).length === q.answer.length
-          && (q.answer as string[]).every(a => (answers[i] as string[]).includes(a));
+        const isFill = q.type === 'fill';
+        const isEssay = q.type === 'essay';
+        // 选择题按选项精确匹配判对错；填空题按空位答案（去除空格/大小写后）近似匹配；解答题无自动判题（标注为待自评）
+        let correct = false;
+        if (isEssay) {
+          correct = false;
+        } else if (isFill) {
+          const normS = (s: string) => (s || '').trim().toLowerCase();
+          const exp = (q.answer || []) as string[];
+          const got = (answers && Array.isArray(answers[i]) ? answers[i] : []) as string[];
+          correct = exp.length > 0 && got.length === exp.length
+            && exp.every((a, j) => normS(a) === normS(got[j]));
+        } else {
+          correct = Array.isArray(q.answer) && q.answer.length > 0
+            && Array.isArray(answers && answers[i])
+            && (answers[i] as string[]).length === q.answer.length
+            && (q.answer as string[]).every(a => (answers[i] as string[]).includes(a));
+        }
         lines.push('');
-        lines.push(`第${i + 1}题：${q.question}`);
-        lines.push(`选项：${optTxt}`);
-        lines.push(`正确答案：${ansTxt}`);
-        lines.push(`用户作答：${userTxt}（${correct ? '正确' : '错误或未作答'}）`);
+        lines.push(`第${i + 1}题（${isFill ? '填空题' : isEssay ? '解答题' : '选择题'}）：${q.question}`);
+        if (optTxt) lines.push(`选项：${optTxt}`);
+        lines.push(`正确答案${isEssay ? '（参考答案要点）' : ''}：${ansTxt}`);
+        lines.push(`用户作答：${userTxt}${isEssay ? '（解答题请对照参考答案要点判断其完整性，不作为自动判题依据）' : `（${correct ? '正确' : '错误或未作答'}）`}`);
       });
 
       const { text } = await gw.generateOnce(provider, agent, [{ role: 'user', content: lines.join('\n') }], 0.3);
@@ -271,25 +405,35 @@ export function registerQuiz(r: Router, gw: Gateway): void {
       if (!provider) return res.status(400).json({ error: '请先在设置页添加 API 服务商' });
 
       const model = chosenModel || provider.defaultModel;
+      const isFill = q.type === 'fill';
+      const isEssay = q.type === 'essay';
+      const typeName = isFill ? '填空题' : isEssay ? '解答题' : '选择题';
       const agent: AgentConfig = {
         id: 'default', name: '题解老师', role: 'assistant',
         providerId: provider.id, model, enabled: true,
-        systemPrompt: '你是 studentbuddy 的题解老师。针对用户指定的某一道选择题，给出详细解析：考点、正确项为什么对、错误项为什么错、解题步骤、举一反三提示。语言通俗、结构清晰。',
+        systemPrompt: `你是 studentbuddy 的题解老师。针对用户指定的某一道${typeName}，给出详细解析：考点、答案为什么对（选择题说明正确选项依据、错误选项错因；填空题说明空位答案依据；解答题给出完整解题步骤与关键点）、解题过程、举一反三提示。语言通俗、结构清晰。`,
       };
 
       const optTxt = Object.entries(q.options || {})
         .map(([k, v]) => `${k}. ${v}`).join('　');
       const ansTxt = Array.isArray(q.answer) && q.answer.length ? q.answer.join('、') : '（未提供）';
-      const prompt = [
-        `请详细解析下面这道选择题：`,
+      const promptLines = [
+        `请详细解析下面这道${typeName}：`,
         '',
         `题目（第 ${idx + 1} 题）：${q.question}`,
-        `选项：${optTxt}`,
-        `正确答案：${ansTxt}`,
+      ];
+      if (optTxt) promptLines.push(`选项：${optTxt}`);
+      promptLines.push(
+        `正确答案${isEssay ? '（参考答案要点）' : ''}：${ansTxt}`,
         '',
-        '解析请包含：1. 考点；2. 正确选项为什么对；3. 错误选项为什么错；4. 解题步骤（如适用）；5. 一句举一反三提示。',
+        isEssay
+          ? '解析请包含：1. 考点；2. 完整解题步骤（分步展开，讲清每一步的依据）；3. 与参考答案要点的对照说明；4. 常见易错点；5. 一句举一反三提示。'
+          : isFill
+            ? '解析请包含：1. 考点；2. 每个空位答案的依据与推导；3. 常见错误填法；4. 一句举一反三提示。'
+            : '解析请包含：1. 考点；2. 正确选项为什么对；3. 错误选项为什么错；4. 解题步骤（如适用）；5. 一句举一反三提示。',
         '用 Markdown 组织，只输出解析本身。',
-      ].join('\n');
+      );
+      const prompt = promptLines.join('\n');
 
       const { text } = await gw.generateOnce(provider, agent, [{ role: 'user', content: prompt }], 0.4);
       const solution = (text || '').trim() || '（未能生成解析）';
