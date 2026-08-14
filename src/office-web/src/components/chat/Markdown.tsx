@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { parseQuiz, QuizCard } from '../QuizCard';
+import { useMemo, useRef, useState } from 'react';
+import { parseQuiz, QuizCard, type QuizData } from '../QuizCard';
 import { CODE_FOLD_LINES } from './chatStyles';
 
 // ─── 真正的流式 Markdown 渲染器（对标 WorkBuddy / ChatGPT 正文排版）────
@@ -145,6 +145,8 @@ export function MarkdownStream({ text, streaming }: { text: string; streaming: b
 /** 助手消息正文：优先渲染选择题卡片（[QUIZ] 解析成功时），否则走 Markdown。
  *  流式期间 [QUIZ] 已出现但 JSON 未完整/未闭合时，显示占位提示而非半截原始 JSON，
  *  避免「一下子是文本一下子是题目」的观感跳变；流结束后若仍未解析成功再回退 Markdown。
+ *  性能：流式中 [QUIZ] 未闭合时直接短路占位（JSON 必然不完整，避免每个 token 都跑
+ *  昂贵的 parseQuiz + 两次 JSON.parse）；闭合后 useMemo 缓存解析结果，同文本不重复解析。
  *  sessionId / onSessionCreated：透传给 QuizCard 用于 fork 子对话（一键分析继续出题 / 单题解析）。 */
 export function AssistantBody({ text, streaming, sessionId, onSessionCreated }: {
   text: string;
@@ -152,7 +154,28 @@ export function AssistantBody({ text, streaming, sessionId, onSessionCreated }: 
   sessionId?: string | null;
   onSessionCreated?: (sid: string) => void;
 }) {
-  const quiz = parseQuiz(text);
+  // 流式且 [QUIZ] 已出现但 [/QUIZ] 未闭合：JSON 必然不完整，直接占位，跳过 parseQuiz
+  if (streaming && /\[QUIZ\]/i.test(text) && !/\[\/QUIZ\]/i.test(text)) {
+    return (
+      <div className="mc-md" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--mc-muted)', fontSize: 12.5, padding: '4px 2px' }}>
+        <span style={{ display: 'inline-block', width: 7, height: 14, background: 'var(--mc-accent)', animation: 'qcCaret 1s step-end infinite' }} />
+        正在生成题目…
+      </div>
+    );
+  }
+  // 解析缓存：[/QUIZ] 闭合后保持 data 引用稳定——流式期间 [QUIZ] 块已完整时，
+  // 追加的尾部 token 不再触发重复 parseQuiz（避免 QuizCard 每次 token 重渲染）。
+  // 仅在 [QUIZ] 块内容实际变化（前缀不匹配）时才重新解析。
+  const cachedRef = useRef<{ text: string; quiz: QuizData | null }>({ text: '', quiz: null });
+  const quiz = useMemo(() => {
+    if (cachedRef.current && text.startsWith(cachedRef.current.text)) {
+      return cachedRef.current.quiz;
+    }
+    const q = parseQuiz(text);
+    cachedRef.current = { text, quiz: q };
+    return q;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
   if (quiz) return <QuizCard data={quiz} streaming={streaming} sessionId={sessionId} onSessionCreated={onSessionCreated} />;
   if (streaming && /\[QUIZ\]/i.test(text)) {
     return (

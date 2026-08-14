@@ -42,9 +42,11 @@ export function SearchTab({ onMsg }: { onMsg: (msg: string) => void }) {
       <div style={cardStyle}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
           <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-2)' }}>启用联网搜索</span>
-          <label style={{ position: 'relative', display: 'inline-block', width: 48, height: 26, cursor: 'pointer' }}>
+          <label style={{ position: 'relative', display: 'inline-block', width: 48, height: 26, cursor: 'pointer', transition: 'transform .16s cubic-bezier(.2,.7,.3,1)' }}
+            onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.08)'; }}
+            onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}>
             <input type="checkbox" checked={searchCfg.enabled} onChange={e => { setSearchCfg({ ...searchCfg, enabled: e.target.checked }); setSearchDirty(true); }} style={{ opacity: 0, width: 0, height: 0 }} />
-            <span style={{ position: 'absolute', inset: 0, background: searchCfg.enabled ? 'var(--accent)' : '#d1d5db', borderRadius: 26, transition: '0.3s' }}>
+            <span style={{ position: 'absolute', inset: 0, background: searchCfg.enabled ? 'var(--accent)' : '#d1d5db', borderRadius: 26, transition: '0.3s', boxShadow: searchCfg.enabled ? '0 2px 8px rgba(0,185,107,.3)' : 'none' }}>
               <span style={{ position: 'absolute', left: searchCfg.enabled ? 24 : 2, top: 2, width: 22, height: 22, background: '#fff', borderRadius: '50%', transition: '0.3s', boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }} />
             </span>
           </label>
@@ -75,7 +77,7 @@ export function SearchTab({ onMsg }: { onMsg: (msg: string) => void }) {
         )}
 
         <button onClick={saveSearchConfig} disabled={searchBusy || !searchDirty}
-          style={{ ...btnPrimary, opacity: searchBusy || !searchDirty ? 0.5 : 1, cursor: searchBusy || !searchDirty ? 'not-allowed' : 'pointer' }}>
+          className="mc-float" style={{ ...btnPrimary, opacity: searchBusy || !searchDirty ? 0.5 : 1, cursor: searchBusy || !searchDirty ? 'not-allowed' : 'pointer' }}>
           {searchBusy ? '保存中...' : <><IconCheck size={14} /> 保存</>}
         </button>
       </div>

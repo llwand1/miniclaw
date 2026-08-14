@@ -114,7 +114,7 @@ export function ReasoningBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(true);
   if (!text) return null;
   return (
-    <div style={{ border: '1px solid var(--mc-hair)', background: 'var(--mc-glass)', borderRadius: 12, padding: '8px 10px', margin: '0 0 10px', fontSize: 12.5 }}>
+    <div style={{ border: '1px solid var(--mc-hair)', borderLeft: '3px solid var(--mc-accent)', background: 'var(--mc-glass)', borderRadius: 12, padding: '8px 10px', margin: '0 0 10px', fontSize: 12.5, boxShadow: 'var(--mc-shadow-sm)' }}>
       <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'var(--mc-muted)', fontWeight: 600 }}>
         <span style={{ color: 'var(--mc-accent)', display: 'inline-flex' }}><IconThink /></span>
         思考过程

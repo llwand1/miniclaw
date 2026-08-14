@@ -8,7 +8,7 @@ export function ProvidersTab({ onMsg }: { onMsg: (msg: string) => void }) {
   const [show, setShow] = useState(false);
   const [edit, setEdit] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [f, setF] = useState({ type: 'openai', name: '', baseUrl: 'https://api.openai.com/v1', apiKey: '', defaultModel: 'gpt-4o-mini' });
+  const [f, setF] = useState({ type: 'openai', name: '', baseUrl: 'https://api.openai.com/v1', apiKey: '', defaultModel: '' });
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; msg: string }>>({});
 
@@ -18,7 +18,7 @@ export function ProvidersTab({ onMsg }: { onMsg: (msg: string) => void }) {
   useEffect(() => { loadProviders(); }, []);
 
   function newForm() {
-    setF({ type: 'openai', name: '', baseUrl: 'https://api.openai.com/v1', apiKey: '', defaultModel: 'gpt-4o-mini' });
+    setF({ type: 'openai', name: '', baseUrl: 'https://api.openai.com/v1', apiKey: '', defaultModel: '' });
     setEdit(null); setShow(true); onMsg('');
   }
   function editForm(p: any) {
@@ -26,7 +26,7 @@ export function ProvidersTab({ onMsg }: { onMsg: (msg: string) => void }) {
     setEdit(p.id); setShow(true); onMsg('');
   }
   async function save() {
-    if (!f.name.trim() || !f.apiKey.trim()) { onMsg('名称和 API Key 不能为空'); return; }
+    if (!f.name.trim() || !f.apiKey.trim() || !f.defaultModel.trim()) { onMsg('名称、API Key 和默认模型不能为空'); return; }
     setBusy(true); onMsg('');
     try {
       if (edit) {
@@ -78,7 +78,7 @@ export function ProvidersTab({ onMsg }: { onMsg: (msg: string) => void }) {
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>服务商配置</h2>
           <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-4)' }}>同一时刻只能用一个大模型，选中谁就用谁的默认模型</p>
         </div>
-        <button onClick={newForm} style={btnPrimary}><IconPlus size={14} /> 添加服务商</button>
+        <button onClick={newForm} className="mc-float" style={btnPrimary}><IconPlus size={14} /> 添加服务商</button>
       </div>
 
       {show && (
@@ -96,10 +96,10 @@ export function ProvidersTab({ onMsg }: { onMsg: (msg: string) => void }) {
             <input placeholder="默认模型（如：gpt-4o-mini）" value={f.defaultModel} onChange={e => setF({ ...f, defaultModel: e.target.value })} style={inputStyle} />
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <button onClick={save} disabled={busy} style={{ ...btnPrimary, opacity: busy ? 0.6 : 1 }}>
+            <button onClick={save} disabled={busy} className="mc-float" style={{ ...btnPrimary, opacity: busy ? 0.6 : 1 }}>
               {busy ? '保存中...' : <><IconCheck size={14} /> {edit ? '保存' : '添加'}</>}
             </button>
-            <button onClick={() => setShow(false)} disabled={busy} style={btnGhost}><IconX size={14} /> 取消</button>
+            <button onClick={() => setShow(false)} disabled={busy} className="mc-float" style={btnGhost}><IconX size={14} /> 取消</button>
           </div>
         </div>
       )}
@@ -148,7 +148,7 @@ export function ProvidersTab({ onMsg }: { onMsg: (msg: string) => void }) {
                   </span>
                 )}
                 {!p.enabled && (
-                  <button onClick={() => selectProvider(p.id)} style={{ ...btnPrimary, fontSize: 11, padding: '4px 10px' }}>
+                  <button onClick={() => selectProvider(p.id)} className="mc-float" style={{ ...btnPrimary, fontSize: 11, padding: '4px 10px' }}>
                     <IconCheck size={12} /> 设为当前
                   </button>
                 )}
@@ -162,8 +162,8 @@ export function ProvidersTab({ onMsg }: { onMsg: (msg: string) => void }) {
                   }}>
                   {testingId === p.id ? '测试中...' : testResult[p.id] ? testResult[p.id].msg : <><IconActivity size={12} /> 测试</>}
                 </button>
-                <button onClick={() => editForm(p)} style={{ ...btnGhost, fontSize: 11, padding: '4px 10px' }}><IconEdit size={12} /> 编辑</button>
-                <button onClick={() => delProvider(p.id)} style={{ ...btnDanger, fontSize: 11, padding: '4px 10px' }}><IconTrash size={12} /> 删除</button>
+                <button onClick={() => editForm(p)} className="mc-float" style={{ ...btnGhost, fontSize: 11, padding: '4px 10px' }}><IconEdit size={12} /> 编辑</button>
+                <button onClick={() => delProvider(p.id)} className="mc-float" style={{ ...btnDanger, fontSize: 11, padding: '4px 10px' }}><IconTrash size={12} /> 删除</button>
               </div>
             </div>
           </div>

@@ -59,7 +59,8 @@ export function FileView({ store }: { store: ChatPaneStore }) {
                 const sel = activeChangeId === c.changeId;
                 return (
                   <div key={c.changeId} onClick={() => { setActiveChangeId(c.changeId); setActiveArtifact(null); }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 9, cursor: 'pointer', border: '1px solid ' + (sel ? 'var(--mc-accent)' : 'transparent'), background: sel ? 'var(--mc-accent-soft)' : 'transparent' }}>
+                    className="mc-float"
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 9, cursor: 'pointer', border: '1px solid ' + (sel ? 'var(--mc-accent)' : 'transparent'), background: sel ? 'var(--mc-accent-soft)' : 'transparent', transition: 'transform .16s cubic-bezier(.2,.7,.3,1), box-shadow .16s, background .15s, border-color .15s' }}>
                     <span style={{ color: 'var(--mc-muted)', display: 'flex', flexShrink: 0 }}><IconFileCode /></span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--mc-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.path}</div>
@@ -83,7 +84,8 @@ export function FileView({ store }: { store: ChatPaneStore }) {
                 const sel = activeArtifact === a.id;
                 return (
                   <div key={a.id} onClick={() => { setActiveArtifact(a.id); setActiveChangeId(null); }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 9, cursor: 'pointer', border: '1px solid ' + (sel ? 'var(--mc-accent)' : 'transparent'), background: sel ? 'var(--mc-accent-soft)' : 'transparent' }}>
+                    className="mc-float"
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 9, cursor: 'pointer', border: '1px solid ' + (sel ? 'var(--mc-accent)' : 'transparent'), background: sel ? 'var(--mc-accent-soft)' : 'transparent', transition: 'transform .16s cubic-bezier(.2,.7,.3,1), box-shadow .16s, background .15s, border-color .15s' }}>
                     <span style={{ color: 'var(--mc-muted)', display: 'flex', flexShrink: 0 }}>{fileIcon(a.kind)}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--mc-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title || '(无标题)'}</div>

@@ -3,6 +3,9 @@
 /* ═══ 重置 ═══ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
+/* 全屏 SPA：让 #root 撑满视口，三分屏各栏内部滚动、禁止整页被内容撑长 */
+html, body, #root { height: 100%; }
+body { overflow: hidden; }
 button { font-family: inherit; }
 button, [role="button"] { user-select: none; }
 
@@ -20,10 +23,10 @@ button, [role="button"] { user-select: none; }
   --text-4:      #9ca3af;
   --text-5:      #d1d5db;
 
-  --accent:      #6366f1;
-  --accent-soft: #ede9fe;
+  --accent:      #00b96b;
+  --accent-soft: #e8f8f1;
   --accent-text: #ffffff;
-  --accent-hover:#5558e6;
+  --accent-hover:#00a85f;
 
   --success:     #10b981;
   --success-bg:  #f0fdf4;
@@ -59,10 +62,10 @@ button, [role="button"] { user-select: none; }
   --text-4:      #6b7280;
   --text-5:      #4b5563;
 
-  --accent:      #818cf8;
-  --accent-soft: #1e1b4b;
+  --accent:      #34d399;
+  --accent-soft: #052e16;
   --accent-text: #ffffff;
-  --accent-hover:#6366f1;
+  --accent-hover:#10b981;
 
   --success:     #34d399;
   --success-bg:  #052e16;
@@ -89,16 +92,26 @@ body {
   background: var(--bg);
   color: var(--text);
   transition: background 0.25s ease, color 0.25s ease;
+  /* 品牌渐变箭头（绿→蓝）：全局默认鼠标指针（可点击元素仍显示手型、输入区仍显示 I-beam） */
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2300C475'/%3E%3Cstop offset='1' stop-color='%231677FF'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M4 2 L20 12 L12.5 13.5 L16.5 21 L13.5 22.5 L9.5 15 L4 20 Z' fill='url(%23g)' stroke='%23ffffff' stroke-width='1.2'/%3E%3C/svg%3E") 4 2, auto;
 }
 
-/* ═══ 输入框 focus ═══ */
+/* ═══ 输入框 focus + 光标（caret）品牌绿 ═══ */
 input:focus, textarea:focus, select:focus, button:focus-visible {
   outline: none;
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent) !important;
 }
+input, textarea, select, [contenteditable] {
+  caret-color: var(--accent);
+}
+/* 输入框 placeholder 统一为弱化文字色 */
+input::placeholder, textarea::placeholder, [contenteditable]:empty::before {
+  color: var(--text-4);
+  opacity: 0.8;
+}
 
-/* ═══ 选中文本 ═══ */
+/* ═══ 选中文本（品牌绿透出） ═══ */
 ::selection {
   background: color-mix(in srgb, var(--accent) 25%, transparent);
   color: inherit;
@@ -170,3 +183,45 @@ input:focus, textarea:focus, select:focus, button:focus-visible {
   60% { transform: translateX(-3px); }
   80% { transform: translateX(3px); }
 }
+
+/* ═══ QuizCard 完成面板动画（打分徽章弹入 + 撒花彩带） ═══ */
+
+/* 得分徽章：完成时弹入（放大回弹） */
+@keyframes qcPop {
+  0%   { transform: scale(.2) rotate(-10deg); opacity: 0; }
+  60%  { transform: scale(1.15) rotate(4deg); opacity: 1; }
+  80%  { transform: scale(.95) rotate(-2deg); }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+/* 撒花彩带：从顶部落下并旋转淡出 */
+@keyframes qcConfetti {
+  0%   { transform: translateY(0) rotate(0deg); opacity: .9; }
+  70%  { transform: translateY(120px) rotate(220deg); opacity: .8; }
+  100% { transform: translateY(200px) rotate(360deg); opacity: 0; }
+}
+
+/* ═══ 背背背（MemorizePage）翻卡动画 ═══ */
+
+/* 卡片翻面：Y 轴 3D 翻转（正面→反面 / 反面→正面共用） */
+@keyframes memFlip {
+  0%   { transform: rotateY(90deg) scale(.92); opacity: 0; }
+  60%  { transform: rotateY(-8deg) scale(1.02); opacity: 1; }
+  100% { transform: rotateY(0) scale(1); opacity: 1; }
+}
+
+/* 卡片进入背诵流：从右滑入 */
+@keyframes memCardIn {
+  0%   { transform: translateX(24px) scale(.96); opacity: 0; }
+  100% { transform: none; opacity: 1; }
+}
+
+/* 背诵完成总结弹入 */
+@keyframes memDone {
+  0%   { transform: scale(.7); opacity: 0; }
+  55%  { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.mem-flip { animation: memFlip .4s cubic-bezier(.2, .8, .2, 1); }
+.mem-card-in { animation: memCardIn .3s cubic-bezier(.2, .8, .2, 1); }
+.mem-done { animation: memDone .5s cubic-bezier(.2, .8, .2, 1); }

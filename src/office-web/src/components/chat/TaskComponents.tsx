@@ -30,7 +30,8 @@ export function TaskChip({ task, onClick }: { task: RunningTaskFront; onClick: (
   const still = !task.done && task.phase !== 'error' && task.phase !== 'aborted';
   return (
     <button onClick={onClick} title={`${task.title}\n${info.label} · ${mm}:${String(ss).padStart(2, '0')}`}
-      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 12, border: '1px solid var(--mc-hair)', background: 'var(--mc-glass-strong)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', boxShadow: 'var(--mc-shadow-md)', cursor: 'pointer', color: 'var(--mc-text)', fontSize: 12.5, whiteSpace: 'nowrap', transition: 'transform .12s, background .12s' }}
+      className="mc-float"
+      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 12, border: '1px solid var(--mc-hair)', background: 'var(--mc-glass-strong)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', boxShadow: 'var(--mc-shadow-md)', cursor: 'pointer', color: 'var(--mc-text)', fontSize: 12.5, whiteSpace: 'nowrap', transition: 'transform .16s cubic-bezier(.2,.7,.3,1), background .12s, box-shadow .16s' }}
       onMouseDown={e => e.stopPropagation()}>
       {still ? (
         <span style={{ color: info.color, display: 'flex', flexShrink: 0 }}><span className="mc-spin" style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid ' + info.color, borderTopColor: 'transparent' }} /></span>
@@ -96,13 +97,17 @@ export function FoldText({ text, foldChars = TEXT_FOLD_CHARS }: { text: string; 
   return (
     <div style={{ border: '1px solid var(--mc-hair)', borderRadius: 8, overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--mc-seg)', fontSize: 11, color: 'var(--mc-muted2)' }}>
-        <button onClick={() => setOpen(o => !o)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', background: 'transparent', color: 'var(--mc-accent)', cursor: 'pointer', fontSize: 11, fontWeight: 600, padding: 0 }}>
+        <button onClick={() => setOpen(o => !o)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', background: 'transparent', color: 'var(--mc-accent)', cursor: 'pointer', fontSize: 11, fontWeight: 600, padding: 0, transition: 'color .15s' }}
+          onMouseEnter={e => { e.currentTarget.style.color = 'var(--mc-accent-hover)'; }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--mc-accent)'; }}>
           <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: 'transform .15s', transform: open ? 'rotate(90deg)' : 'none' }}><polyline points="9 18 15 12 9 6" /></svg>
           {open ? '收起' : `展开全部 ${lines} 行 · ${text.length.toLocaleString()} 字符`}
         </button>
         <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <button onClick={copy} style={{ border: 'none', background: 'transparent', color: copied ? '#34C759' : 'var(--mc-muted2)', cursor: 'pointer', fontSize: 11, padding: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            {copied ? '✓ 已复制' : '复制'}
+          <button onClick={copy} style={{ border: 'none', background: 'transparent', color: copied ? '#34C759' : 'var(--mc-muted2)', cursor: 'pointer', fontSize: 11, padding: 0, display: 'inline-flex', alignItems: 'center', gap: 4, transition: 'color .15s' }}
+            onMouseEnter={e => { if (!copied) e.currentTarget.style.color = 'var(--mc-accent)'; }}
+            onMouseLeave={e => { if (!copied) e.currentTarget.style.color = 'var(--mc-muted2)'; }}>
+            {copied ? <><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><IconCheck /></span> 已复制</> : '复制'}
           </button>
         </span>
       </div>

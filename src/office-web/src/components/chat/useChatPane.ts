@@ -90,11 +90,12 @@ export interface ChatPaneStore {
   selectedModel: ChatPaneProps['selectedModel'];
   onSelectModel: ChatPaneProps['onSelectModel'];
   onToast?: ChatPaneProps['onToast'];
+  sessionTree: ChatPaneProps['sessionTree'];
 }
 
 /** ChatPane 全部状态、effects 与操作逻辑（从 ChatPane.tsx 拆出，组件只负责渲染）。 */
 export function useChatPane(props: ChatPaneProps): ChatPaneStore {
-  const { paneId, focused, view, openReq, modelOptions, selectedModel, onSelectModel, onFocus, onViewChange, onPaneSessionKnown, onSessionsMutated, onToast, runningSessionIds } = props;
+  const { paneId, focused, view, openReq, modelOptions, selectedModel, onSelectModel, onFocus, onViewChange, onPaneSessionKnown, onSessionsMutated, onToast, runningSessionIds, sessionTree } = props;
 
   const [sid, setSid] = useState<string | null>(null);
   const [msgs, setMsgs] = useState<{ role: string; content: string; tokens?: number; error?: boolean; reasoning?: string; ts?: number | string; model?: string; quiz?: boolean }[]>([]);
@@ -760,6 +761,6 @@ export function useChatPane(props: ChatPaneProps): ChatPaneStore {
     setNavCollapsed, setActiveArtifact, setActiveChangeId, setWsTab,
     setSelectedSkills, setAttachments, setInput, setShowModel, setShowSkills, setShowAttach,
     // 透传 props（只读）
-    focused, view, modelOptions, selectedModel, onSelectModel, onToast,
+    focused, view, modelOptions, selectedModel, onSelectModel, onToast, sessionTree,
   };
 }

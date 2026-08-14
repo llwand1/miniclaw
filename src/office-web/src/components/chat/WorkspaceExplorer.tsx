@@ -1,5 +1,5 @@
 import { CSSProperties, Fragment, ReactNode, useEffect, useState } from 'react';
-import { IconCaret, IconFileCode, IconFolder } from './chatIcons';
+import { IconAlert, IconCaret, IconFileCode, IconFolder } from './chatIcons';
 import { lcsLineDiff } from './chatUtils';
 import { FoldText } from './TaskComponents';
 
@@ -147,7 +147,7 @@ export function WorkspaceExplorer({ changes, onRevert, onToast }: { changes: any
                 <div>
                   {fileMeta?.truncated && (
                     <div style={{ marginBottom: 8, padding: '5px 9px', borderRadius: 8, background: 'rgba(255,149,0,.08)', border: '1px solid rgba(255,149,0,.3)', color: 'var(--mc-pin)', fontSize: 11 }}>
-                      ⚠️ 文件较大（{fileMeta.size?.toLocaleString?.() ?? ''} 字节），已截断显示，如需完整内容可在对话中让 AI 分段读取。
+                      <span style={{ display: 'inline-flex', flexShrink: 0, marginTop: 1 }}><IconAlert /></span> 文件较大（{fileMeta.size?.toLocaleString?.() ?? ''} 字节），已截断显示，如需完整内容可在对话中让 AI 分段读取。
                     </div>
                   )}
                   <FoldText text={fileContent} />

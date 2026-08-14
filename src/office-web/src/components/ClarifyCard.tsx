@@ -14,7 +14,7 @@ export interface ClarifyData {
 }
 
 const C = {
-  accent: '#6366f1',
+  accent: '#00B96B',
   text: '#1f2430',
   muted: '#8a8f9c',
   hair: 'rgba(0,0,0,.08)',
@@ -42,7 +42,9 @@ export function ClarifyCard({ data, answered, onSubmit }: {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {data.options.map((opt, i) => (
               <button key={i} onClick={() => onSubmit(opt)}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, border: '1px solid ' + C.hair, background: 'transparent', color: C.text, cursor: 'pointer', fontSize: 12.5, textAlign: 'left' }}>
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, border: '1px solid ' + C.hair, background: 'transparent', color: C.text, cursor: 'pointer', fontSize: 12.5, textAlign: 'left', transition: 'border-color .15s, background .15s, transform .16s cubic-bezier(.2,.7,.3,1)' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.background = 'rgba(0,185,107,.05)'; e.currentTarget.style.transform = 'translateX(2px)'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = C.hair; e.currentTarget.style.background = 'transparent'; e.currentTarget.style.transform = 'none'; }}>
                 <span style={{ fontWeight: 700, color: C.accent, flexShrink: 0 }}>{String.fromCharCode(65 + i)}.</span>
                 <span style={{ flex: 1 }}>{opt}</span>
               </button>
@@ -54,14 +56,16 @@ export function ClarifyCard({ data, answered, onSubmit }: {
                 onKeyDown={e => { if (e.key === 'Enter' && custom.trim()) onSubmit(custom.trim()); }}
                 style={{ flex: 1, padding: '6px 10px', borderRadius: 8, border: '1px solid ' + C.hair, fontSize: 12.5, outline: 'none', background: '#fff', color: C.text }} />
               <button onClick={() => custom.trim() && onSubmit(custom.trim())} disabled={!custom.trim()}
-                style={{ padding: '6px 14px', borderRadius: 8, border: 'none', background: custom.trim() ? C.accent : C.hair, color: custom.trim() ? '#fff' : C.muted, cursor: custom.trim() ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 600 }}>
+                style={{ padding: '6px 14px', borderRadius: 8, border: 'none', background: custom.trim() ? C.accent : C.hair, color: custom.trim() ? '#fff' : C.muted, cursor: custom.trim() ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 600, transition: 'background .15s, transform .16s cubic-bezier(.2,.7,.3,1), opacity .15s' }}
+                onMouseEnter={e => { if (custom.trim()) e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                onMouseLeave={e => { e.currentTarget.style.transform = 'none'; }}>
                 提交
               </button>
             </div>
           )}
         </>
       ) : (
-        <div style={{ padding: '6px 10px', borderRadius: 8, background: 'rgba(99,102,241,.08)', border: '1px solid rgba(99,102,241,.3)', color: C.text, fontSize: 12 }}>
+        <div style={{ padding: '6px 10px', borderRadius: 8, background: 'rgba(0,185,107,.08)', border: '1px solid rgba(0,185,107,.3)', color: C.text, fontSize: 12 }}>
           已选择：<strong>{answered}</strong>，正在继续处理…
         </div>
       )}

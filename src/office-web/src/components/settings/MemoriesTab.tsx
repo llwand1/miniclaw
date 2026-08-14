@@ -59,7 +59,7 @@ export function MemoriesTab({ onMsg }: { onMsg: (msg: string) => void }) {
             {items.map((m: any) => (
               <div key={m.id} style={{ ...cardStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px' }}>
                 <span style={{ fontSize: 13, color: 'var(--text-2)' }}>{m.content}</span>
-                <button onClick={() => delMemory(m.id)} style={{ ...btnDanger, fontSize: 11, padding: '3px 10px' }}><IconTrash size={12} /> 删除</button>
+                <button onClick={() => delMemory(m.id)} className="mc-float" style={{ ...btnDanger, fontSize: 11, padding: '3px 10px' }}><IconTrash size={12} /> 删除</button>
               </div>
             ))}
           </div>

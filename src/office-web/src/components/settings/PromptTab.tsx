@@ -54,16 +54,18 @@ export function PromptTab({ onMsg }: { onMsg: (msg: string) => void }) {
         />
         <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
           <button onClick={saveSystemPrompt} disabled={promptBusy || !promptDirty}
-            style={{ ...btnPrimary, opacity: promptBusy || !promptDirty ? 0.5 : 1, cursor: promptBusy || !promptDirty ? 'not-allowed' : 'pointer' }}>
+            className="mc-float" style={{ ...btnPrimary, opacity: promptBusy || !promptDirty ? 0.5 : 1, cursor: promptBusy || !promptDirty ? 'not-allowed' : 'pointer' }}>
             {promptBusy ? '保存中...' : <><IconCheck size={14} /> 保存</>}
           </button>
-          <button onClick={() => loadSystemPrompt()} style={btnGhost}><IconRefresh size={14} /> 撤销修改</button>
+          <button onClick={() => loadSystemPrompt()} className="mc-float" style={btnGhost}><IconRefresh size={14} /> 撤销修改</button>
         </div>
       </div>
 
       <div style={{ ...cardStyle, background: 'var(--bg-inset)' }}>
         <details>
-          <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--text-3)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--text-3)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 8, transition: 'background .15s, color .15s' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-muted)'; e.currentTarget.style.color = 'var(--text)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-3)'; }}>
             <IconCode size={14} /> 最终发给模型的系统提示词（含自动注入的工具说明与记忆）
           </summary>
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12, color: 'var(--text-2)', marginTop: 10, lineHeight: 1.7, maxHeight: 340, overflowY: 'auto', background: '#fff', padding: '12px 16px', borderRadius: 8, border: '1px solid var(--border)', fontFamily: 'Menlo, Consolas, monospace' }}>

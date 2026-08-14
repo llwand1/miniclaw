@@ -148,10 +148,10 @@ export function SkillsTab({ onMsg }: { onMsg: (msg: string) => void }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={importSkills} disabled={importing} style={{ ...btnGhost, opacity: importing ? 0.5 : 1, cursor: importing ? 'not-allowed' : 'pointer' }}>
+          <button onClick={importSkills} disabled={importing} className="mc-float" style={{ ...btnGhost, opacity: importing ? 0.5 : 1, cursor: importing ? 'not-allowed' : 'pointer' }}>
             {importing ? '导入中...' : <><IconSync size={14} /> 从 WorkBuddy 导入</>}
           </button>
-          <button onClick={startNewSkill} style={btnPrimary}><IconPlus size={14} /> 新建技能</button>
+          <button onClick={startNewSkill} className="mc-float" style={btnPrimary}><IconPlus size={14} /> 新建技能</button>
         </div>
       </div>
 
@@ -163,7 +163,7 @@ export function SkillsTab({ onMsg }: { onMsg: (msg: string) => void }) {
         <div style={{ ...cardStyle, borderColor: 'var(--accent)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <h3 style={{ margin: 0, fontSize: 15, color: 'var(--text)', fontWeight: 600 }}>{skillEdit === 'new' ? '新建技能' : '编辑技能'}</h3>
-            <button onClick={() => setSkillEdit(null)} style={{ ...btnGhost, padding: '4px 10px' }}><IconX size={14} /> 取消</button>
+            <button onClick={() => setSkillEdit(null)} className="mc-float" style={{ ...btnGhost, padding: '4px 10px' }}><IconX size={14} /> 取消</button>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
@@ -184,7 +184,7 @@ export function SkillsTab({ onMsg }: { onMsg: (msg: string) => void }) {
             <Toggle checked={skillForm.enabled} onChange={v => setSkillForm({ ...skillForm, enabled: v })} />
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-            <button onClick={saveSkill} disabled={skillBusy} style={{ ...btnPrimary, opacity: skillBusy ? 0.5 : 1, cursor: skillBusy ? 'not-allowed' : 'pointer' }}>
+            <button onClick={saveSkill} disabled={skillBusy} className="mc-float" style={{ ...btnPrimary, opacity: skillBusy ? 0.5 : 1, cursor: skillBusy ? 'not-allowed' : 'pointer' }}>
               {skillBusy ? '保存中...' : <><IconCheck size={14} /> 保存</>}
             </button>
           </div>
@@ -216,9 +216,9 @@ export function SkillsTab({ onMsg }: { onMsg: (msg: string) => void }) {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 12, flexShrink: 0 }}>
             <Toggle checked={!!s.enabled} onChange={() => toggleSkill(s)} />
-            <button onClick={() => startEditSkill(s)} style={{ ...btnGhost, padding: '4px 10px' }}><IconEdit size={13} /> 编辑</button>
-            <button onClick={() => exportSkill(s.id)} style={{ ...btnGhost, padding: '4px 10px' }} title="导出到 WorkBuddy"><IconExternalLink size={13} /></button>
-            <button onClick={() => deleteSkill(s.id)} style={{ ...btnDanger, padding: '4px 10px', fontSize: 11 }}><IconTrash size={13} /></button>
+            <button onClick={() => startEditSkill(s)} className="mc-float" style={{ ...btnGhost, padding: '4px 10px' }}><IconEdit size={13} /> 编辑</button>
+            <button onClick={() => exportSkill(s.id)} className="mc-float" style={{ ...btnGhost, padding: '4px 10px' }} title="导出到 WorkBuddy"><IconExternalLink size={13} /></button>
+            <button onClick={() => deleteSkill(s.id)} className="mc-float" style={{ ...btnDanger, padding: '4px 10px', fontSize: 11 }}><IconTrash size={13} /></button>
           </div>
         </div>
       ))}

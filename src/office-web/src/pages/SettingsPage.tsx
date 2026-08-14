@@ -20,9 +20,12 @@ export default function SettingsPage() {
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
-      {/* ─── 左侧边栏 ─── */}
+      {/* ─── 左侧边栏（玻璃质感）─── */}
       <aside style={{
-        width: 200, borderRight: '1px solid var(--border)', background: 'var(--bg-inset)',
+        width: 200, borderRight: '1px solid var(--mc-glass-border, rgba(255,255,255,.4))',
+        background: 'var(--mc-glass-grad, rgba(255,255,255,.55))',
+        backdropFilter: 'blur(22px) saturate(180%)', WebkitBackdropFilter: 'blur(22px) saturate(180%)',
+        boxShadow: 'var(--mc-glow-hi, inset 0 1px 0 rgba(255,255,255,.5))',
         display: 'flex', flexDirection: 'column', padding: '16px 0', flexShrink: 0,
         transition: 'background 0.25s, border-color 0.25s',
       }}>
@@ -43,8 +46,10 @@ export default function SettingsPage() {
                   color: active ? 'var(--accent)' : 'var(--text-3)',
                   cursor: 'pointer', fontSize: 13, fontWeight: active ? 600 : 400,
                   textAlign: 'left', width: '100%',
-                  transition: 'all 0.12s ease',
-                }}>
+                  transition: 'all 0.12s ease, transform .16s cubic-bezier(.2,.7,.3,1)',
+                }}
+                onMouseEnter={e => { if (!active) { e.currentTarget.style.background = 'var(--bg-muted)'; e.currentTarget.style.transform = 'translateX(2px)'; } }}
+                onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.transform = 'none'; } }}>
                 <Icon size={16} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                   <span>{t.label}</span>
@@ -56,8 +61,8 @@ export default function SettingsPage() {
         </nav>
       </aside>
 
-      {/* ─── 右侧内容区 ─── */}
-      <main style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', background: 'var(--bg)', transition: 'background 0.25s' }}>
+      {/* ─── 右侧内容区（玻璃容器）─── */}
+      <main style={{ flex: 1, overflowY: 'auto', padding: '20px 28px', background: 'var(--mc-glass, rgba(255,255,255,.35))', backdropFilter: 'blur(16px) saturate(160%)', WebkitBackdropFilter: 'blur(16px) saturate(160%)', transition: 'background 0.25s' }}>
         {/* 全局消息提示 */}
         {msg && (
           <div style={{

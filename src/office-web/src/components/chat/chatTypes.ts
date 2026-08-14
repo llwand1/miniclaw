@@ -86,6 +86,8 @@ export interface ChatPaneProps {
   view: 'chat' | 'files';
   openReq: OpenReq | null;
   sessions: Session[];
+  /** 会话树（/api/sessions/tree）：供对话历史导航面板渲染「主对话 + 子对话」分支树 */
+  sessionTree?: SessionNode[];
   modelOptions: ModelOption[];
   selectedModel: SelectedModel | null;
   onSelectModel: (m: SelectedModel) => void;

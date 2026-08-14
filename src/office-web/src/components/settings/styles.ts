@@ -8,8 +8,11 @@ export const codeStyle: React.CSSProperties = {
   background: '#f0f0f0', padding: '2px 6px', borderRadius: 5, fontSize: 12, fontFamily: 'Menlo, Consolas, monospace',
 };
 export const cardStyle: React.CSSProperties = {
-  padding: '14px 18px', border: '1px solid var(--border)', borderRadius: 10,
-  marginBottom: 10, background: 'var(--bg-surface)', transition: 'box-shadow 0.15s, background 0.25s, border-color 0.25s',
+  padding: '14px 18px', border: '1px solid var(--mc-glass-border, rgba(255,255,255,.45))', borderRadius: 12,
+  marginBottom: 10, background: 'var(--mc-glass-grad, rgba(255,255,255,.6))',
+  backdropFilter: 'blur(16px) saturate(160%)', WebkitBackdropFilter: 'blur(16px) saturate(160%)',
+  boxShadow: 'var(--mc-glow-hi, inset 0 1px 0 rgba(255,255,255,.5)), 0 2px 8px rgba(0,0,0,.05)',
+  transition: 'box-shadow 0.15s, background 0.25s, border-color 0.25s, transform .16s cubic-bezier(.2,.7,.3,1)',
 };
 export const btnBase: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 5,

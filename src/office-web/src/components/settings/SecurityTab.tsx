@@ -136,7 +136,7 @@ export function SecurityTab() {
             <span style={{ fontWeight: 600 }}>安全面板加载失败</span>
           </div>
           <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 8, lineHeight: 1.6 }}>{loadError}</div>
-          <button onClick={loadAll} style={{ ...btnPrimary, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <button onClick={loadAll} className="mc-float" style={{ ...btnPrimary, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <IconRefresh size={14} /> 重试
           </button>
         </div>
@@ -254,13 +254,15 @@ export function SecurityTab() {
         </div>
         <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
           <input type="text" value={newBlockEntry} onChange={(e) => setNewBlockEntry(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addBlockEntry(); }} placeholder="如：secrets/ 或 credentials.json" style={{ ...inputStyle, flex: 1 }} />
-          <button onClick={addBlockEntry} disabled={!newBlockEntry.trim()} style={{ ...btnPrimary, opacity: newBlockEntry.trim() ? 1 : 0.5 }}><IconPlus size={14} /> 添加</button>
+          <button onClick={addBlockEntry} disabled={!newBlockEntry.trim()} className="mc-float" style={{ ...btnPrimary, opacity: newBlockEntry.trim() ? 1 : 0.5 }}><IconPlus size={14} /> 添加</button>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {policy.pathBlocklist.map(entry => (
             <span key={entry} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--bg-muted)', borderRadius: 6, padding: '4px 8px', fontSize: 12 }}>
               <code style={{ fontFamily: 'Menlo, Consolas, monospace' }}>{entry}</code>
-              <button onClick={() => removeBlockEntry(entry)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--danger)', padding: 0, lineHeight: 1 }} title="移除">×</button>
+              <button onClick={() => removeBlockEntry(entry)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--danger)', padding: '0 2px', lineHeight: 1, borderRadius: 4, transition: 'background .15s, color .15s' }} title="移除"
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--danger-bg)'; e.currentTarget.style.color = 'var(--danger)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>×</button>
             </span>
           ))}
         </div>
@@ -271,7 +273,7 @@ export function SecurityTab() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <IconActivity size={16} style={{ color: 'var(--accent)' }} />
           <span style={{ fontSize: 14, fontWeight: 600 }}>审批队列（{approvals.length} 项待处理）</span>
-          <button onClick={loadAll} style={{ ...btnGhost, marginLeft: 'auto' }}><IconRefresh size={14} /> 刷新</button>
+          <button onClick={loadAll} className="mc-float" style={{ ...btnGhost, marginLeft: 'auto' }}><IconRefresh size={14} /> 刷新</button>
         </div>
         {approvals.length === 0 ? (
           <div style={{ fontSize: 13, color: 'var(--text-3)', padding: '12px 0' }}>暂无待审批的写入变更。当 AI 发起 write/edit 时，变更会出现在这里。</div>
@@ -289,8 +291,8 @@ export function SecurityTab() {
                   <span>原内容 {item.before.length} 字符 → 新内容 {item.after.length} 字符</span>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => approve(item.id)} disabled={busy} style={{ ...btnPrimary, fontSize: 12 }}><IconCheck size={12} /> 批准写入</button>
-                  <button onClick={() => reject(item.id)} disabled={busy} style={{ ...btnDanger, fontSize: 12 }}><IconX size={12} /> 拒绝</button>
+                  <button onClick={() => approve(item.id)} disabled={busy} className="mc-float" style={{ ...btnPrimary, fontSize: 12 }}><IconCheck size={12} /> 批准写入</button>
+                  <button onClick={() => reject(item.id)} disabled={busy} className="mc-float" style={{ ...btnDanger, fontSize: 12 }}><IconX size={12} /> 拒绝</button>
                 </div>
               </div>
             ))}

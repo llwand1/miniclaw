@@ -8,7 +8,7 @@ import { previewSandbox } from '../../../shared/preview-types';
 import {
   IconRefresh, IconTrash, IconExternalLink, IconPlus, IconMonitor, IconCode, IconCopy, IconDownload,
 } from '../components/Icons';
-import { IconFiles } from '../components/chat/chatIcons';
+import { IconFileDoc, IconFiles, IconFolder } from '../components/chat/chatIcons';
 
 // 去重守卫：避免反复切换 tab 时把同一份 initialHtml 重复 push 成多个 artifact
 let lastPushedHtml: string | null = null;
@@ -44,10 +44,14 @@ const btnStyle: React.CSSProperties = {
 const btnHover = (e: React.MouseEvent<HTMLButtonElement>) => {
   e.currentTarget.style.background = 'var(--bg-muted)';
   e.currentTarget.style.color = 'var(--text)';
+  e.currentTarget.style.transform = 'translateY(-1px)';
+  e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
 };
 const btnLeave = (e: React.MouseEvent<HTMLButtonElement>) => {
   e.currentTarget.style.background = 'transparent';
   e.currentTarget.style.color = 'var(--text-3)';
+  e.currentTarget.style.transform = 'none';
+  e.currentTarget.style.boxShadow = 'none';
 };
 
 // 把 artifact 渲染成可在 iframe 中加载的 HTML 文档。
@@ -406,14 +410,15 @@ export default function PreviewPage({ initialHtml }: { initialHtml?: string | nu
             {!fsLoading && !fsError && fsNodes.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-4)', padding: '6px 4px' }}>空目录</div>}
             {fsNodes.map((n) => (
               <button key={n.path} onClick={() => openFsFile(n)} disabled={fsBusy} title={n.path}
+                className="mc-float"
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px', border: 'none', borderRadius: 6,
                   background: 'transparent', color: 'var(--text-2)', cursor: 'pointer', fontSize: 12.5, textAlign: 'left',
-                  transition: 'background .12s', flexShrink: 0,
+                  transition: 'background .12s, transform .16s cubic-bezier(.2,.7,.3,1), box-shadow .16s', flexShrink: 0,
                 }}
                 onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-muted)'; }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
-                <span style={{ flexShrink: 0, color: n.type === 'dir' ? 'var(--accent)' : 'var(--text-4)' }}>{n.type === 'dir' ? '📁' : '📄'}</span>
+                <span style={{ flexShrink: 0, color: n.type === 'dir' ? 'var(--accent)' : 'var(--text-4)', display: 'inline-flex' }}>{n.type === 'dir' ? <IconFolder /> : <IconFileDoc />}</span>
                 <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.name}</span>
                 {n.type === 'file' && n.size != null && <span style={{ flexShrink: 0, fontSize: 11, color: 'var(--text-5)' }}>{fmtSize(n.size)}</span>}
               </button>
@@ -428,14 +433,17 @@ export default function PreviewPage({ initialHtml }: { initialHtml?: string | nu
           {artifacts.map((a) => (
             <button key={a.id} onClick={() => setActiveId(a.id)}
               title={a.title}
+              className="mc-float"
               style={{
                 maxWidth: 160, padding: '5px 12px', border: 'none', borderRadius: 7, cursor: 'pointer',
                 fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 fontWeight: a.id === activeId ? 600 : 400,
                 background: a.id === activeId ? 'var(--accent)' : 'transparent',
                 color: a.id === activeId ? 'var(--accent-text)' : 'var(--text-3)',
-                transition: 'all 0.12s',
-              }}>
+                transition: 'all 0.15s',
+              }}
+              onMouseEnter={e => { if (a.id !== activeId) e.currentTarget.style.background = 'var(--bg-muted)'; }}
+              onMouseLeave={e => { if (a.id !== activeId) e.currentTarget.style.background = 'transparent'; }}>
               {a.title}
             </button>
           ))}

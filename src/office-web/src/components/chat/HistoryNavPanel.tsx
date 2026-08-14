@@ -1,5 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import type { NavItem } from './chatTypes';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import type { NavItem, SessionNode } from './chatTypes';
+
+/** 在会话树中定位从根到目标会话的路径（含目标自身）；找不到返回 null。 */
+function findPathTo(nodes: SessionNode[], sid: string): SessionNode[] | null {
+  for (const n of nodes) {
+    if (n.id === sid) return [n];
+    const sub = findPathTo(n.children, sid);
+    if (sub) return [n, ...sub];
+  }
+  return null;
+}
 
 // =========================================================================
 // HistoryNavPanel —— 对话历史导航面板
@@ -15,6 +25,9 @@ export function HistoryNavPanel({
   onToggleCollapse,
   scrollRootRef,
   autoHighlightId,
+  sessionTree,
+  currentSessionId,
+  onOpenSession,
 }: {
   items: NavItem[];
   collapsed: boolean;
@@ -22,10 +35,49 @@ export function HistoryNavPanel({
   scrollRootRef: React.RefObject<HTMLDivElement | null>;
   /** 外部指定要高亮的条目 id（自动滚动到底后高亮最新回复）；存在时优先于 IntersectionObserver。 */
   autoHighlightId?: string | null;
+  /** 会话树（/api/sessions/tree）：用于渲染「主对话 + 子对话」分支导航 */
+  sessionTree?: SessionNode[];
+  /** 当前会话 id：分支树中高亮它 */
+  currentSessionId?: string | null;
+  /** 点击分支节点 → 切换到对应会话（fork 子对话跳转用） */
+  onOpenSession?: (sid: string) => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
+  // 子对话收起状态：true 时「对话分支」只显示主对话主干，隐藏 fork 出的子对话分支（默认展开）
+  const [subCollapsed, setSubCollapsed] = useState(false);
   // 外部接管标记：自动导航时置 true，用户滚动离开底部 / 点击导航项后置 false（恢复 observer 跟随）。
   const lockRef = useRef(false);
+
+  // 从会话树中定位当前会话所在的根分支（根 = 主对话，其后代 = 子对话分支）
+  const branchPath = useMemo(() => {
+    if (!sessionTree || !currentSessionId) return null;
+    return findPathTo(sessionTree, currentSessionId);
+  }, [sessionTree, currentSessionId]);
+  const branchRoot = branchPath ? branchPath[0] : null;
+
+  // ── 主/子对话分支树：Git 分支图式渲染（参照 gitk / GitKraken）。
+  // 主对话 = 最左侧一条竖直主干线；子对话从主干分叉向右展开，每个会话是一个圆点。
+  const ROW_H = 28;    // 行高
+  const LANE_W = 18;   // 分支线横向间距
+  const DOT = 10;      // 圆点直径
+  const laneX = (lane: number) => 14 + lane * LANE_W;       // 该 lane 圆点中心 x
+  const rowY = (row: number) => 4 + row * ROW_H + ROW_H / 2; // 该行圆点中心 y
+  const TRUNK_C = 'rgba(0,185,107,.6)';   // 主干线（accent 系）
+  const BRANCH_C = 'rgba(120,128,148,.55)'; // 分支线
+
+  // 布局：DFS 前序分配行号；每个子对话分配独立 lane（永远在父的右侧，形成向右分叉）
+  type LayoutNode = { node: SessionNode; lane: number; row: number; parent: LayoutNode | null };
+  const layout: LayoutNode[] = [];
+  let nextLane = 1;
+  const buildLayout = (n: SessionNode, lane: number, parent: LayoutNode | null): void => {
+    const self: LayoutNode = { node: n, lane, row: layout.length, parent };
+    layout.push(self);
+    for (const c of n.children || []) buildLayout(c, nextLane++, self);
+  };
+  if (branchRoot) buildLayout(branchRoot, 0, null);
+  // 收起子对话：仅保留 lane 0（主对话主干），隐藏 fork 出的子对话分支圆点/连线
+  const visibleLayout = subCollapsed ? layout.filter((N) => N.lane === 0) : layout;
+  const treeH = visibleLayout.length * ROW_H + 8;
 
   // 外部高亮（自动导航/新回复到达时）：立即高亮最新消息，并短暂接管（防止 observer 立即覆盖）。
   useEffect(() => {
@@ -86,6 +138,7 @@ export function HistoryNavPanel({
       <div
         onClick={onToggleCollapse}
         title="展开对话历史导航"
+        className="mc-float"
         style={{
           width: 18,
           flexShrink: 0,
@@ -130,6 +183,7 @@ export function HistoryNavPanel({
         <button
           onClick={onToggleCollapse}
           title="收起"
+          className="mc-float"
           style={{
             border: 'none',
             background: 'transparent',
@@ -138,11 +192,83 @@ export function HistoryNavPanel({
             fontSize: 11,
             padding: '2px 4px',
             borderRadius: 4,
+            transition: 'background .15s, color .15s, transform .16s cubic-bezier(.2,.7,.3,1)',
           }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--mc-hair)'; e.currentTarget.style.color = 'var(--mc-accent)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--mc-muted)'; }}
         >
           ▶
         </button>
       </div>
+      {/* 主/子对话分支树：Git 分支图式（主对话=最左侧竖直主干线，子对话=向右分叉的圆点分支） */}
+      {branchRoot && layout.length > 0 && (
+        <div style={{ borderBottom: '1px solid var(--mc-hair)', padding: '6px 0 10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '4px 10px 6px', gap: 4 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--mc-muted)' }}>对话分支</span>
+            <span style={{ flex: 1 }} />
+            {layout.some((N) => N.lane > 0) && (
+              <button
+                onClick={() => setSubCollapsed((c) => !c)}
+                title={subCollapsed ? '展开子对话分支' : '收起子对话分支'}
+                style={{
+                  border: 'none', background: 'transparent', color: 'var(--mc-muted)',
+                  cursor: 'pointer', fontSize: 10, padding: '1px 4px', borderRadius: 4,
+                }}
+              >
+                {subCollapsed ? '展开' : '收起'}
+              </button>
+            )}
+          </div>
+          <div style={{ position: 'relative', height: treeH, maxHeight: 170, overflowY: 'auto' }}>
+            {/* 主干线：主对话（根）所在 lane0 的竖直主干，从主对话圆点向下贯穿 */}
+            <div style={{ position: 'absolute', left: laneX(0) - 1, top: rowY(0), height: treeH - rowY(0), width: 2, background: TRUNK_C }} />
+            {/* 分支线：水平分叉（父圆点行高度）+ 竖直分支（父行 → 子圆点） */}
+            {visibleLayout.slice(1).map((N) => {
+              const p = N.parent!;
+              const forkY = rowY(p.row);
+              const lx = laneX(N.lane);
+              return (
+                <Fragment key={N.node.id + '-lines'}>
+                  <div style={{ position: 'absolute', left: laneX(p.lane) + DOT / 2, top: forkY - 1, width: lx - laneX(p.lane) - DOT / 2, height: 2, background: BRANCH_C }} />
+                  <div style={{ position: 'absolute', left: lx - 1, top: forkY, height: rowY(N.row) - forkY - DOT / 2, width: 2, background: BRANCH_C }} />
+                </Fragment>
+              );
+            })}
+            {/* 节点圆点：主对话=accent 大圆点，子对话=灰色小圆点，当前会话加外圈高亮 */}
+            {visibleLayout.map((N) => {
+              const isRoot = N.lane === 0;
+              const isCurrent = N.node.id === currentSessionId;
+              const size = isRoot ? DOT + 4 : DOT;
+              const lx = laneX(N.lane);
+              return (
+                <div
+                  key={N.node.id}
+                  onClick={() => { if (!isCurrent && onOpenSession) onOpenSession(N.node.id); }}
+                  title={`${isRoot ? '主对话' : '子对话'}${isCurrent ? '（当前）' : ''}：${N.node.title || '新对话'}`}
+                  style={{ position: 'absolute', left: lx - size / 2, top: rowY(N.row) - size / 2, width: size, height: size, borderRadius: '50%', background: isRoot || isCurrent ? 'var(--mc-accent)' : '#8e8e93', boxShadow: isCurrent ? '0 0 0 3px var(--mc-accent-soft), 0 0 0 3.5px var(--mc-accent)' : 'none', cursor: isCurrent ? 'default' : 'pointer', zIndex: 2 }}
+                />
+              );
+            })}
+            {/* 节点标题 */}
+            {visibleLayout.map((N) => {
+              const isRoot = N.lane === 0;
+              const isCurrent = N.node.id === currentSessionId;
+              const lx = laneX(N.lane);
+              return (
+                <div
+                  key={N.node.id + '-label'}
+                  onClick={() => { if (!isCurrent && onOpenSession) onOpenSession(N.node.id); }}
+                  title={`${isRoot ? '主对话' : '子对话'}${isCurrent ? '（当前）' : ''}：${N.node.title || '新对话'}`}
+                  style={{ position: 'absolute', left: lx + 9, top: rowY(N.row) - 7, maxWidth: 232 - lx, display: 'block', fontSize: 11.5, lineHeight: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: isCurrent ? 'var(--mc-accent)' : 'var(--mc-text)', fontWeight: isCurrent ? 600 : 400, cursor: isCurrent ? 'default' : 'pointer', zIndex: 2 }}
+                >
+                  {N.node.title || '新对话'}
+                  {isCurrent && <span style={{ color: 'var(--mc-muted2)', fontSize: 9.5, marginLeft: 4 }}>当前</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
         {recent.length === 0 && (
           <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--mc-muted2)' }}>

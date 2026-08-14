@@ -15,10 +15,10 @@ function ChatPane({ store, focused, onFocus, style }: ChatPaneShellProps) {
 
   const paneBase: CSSProperties = {
     display: 'flex', flexDirection: 'column', minWidth: 0,
-    background: 'var(--mc-glass-strong)',
-    backdropFilter: 'blur(24px) saturate(180%)', WebkitBackdropFilter: 'blur(24px) saturate(180%)',
-    border: '1px solid var(--mc-hair)', borderRadius: 16, overflow: 'hidden',
-    boxShadow: 'var(--mc-shadow-md)', transition: 'box-shadow .18s',
+    background: 'var(--mc-glass-grad)',
+    backdropFilter: 'blur(28px) saturate(180%)', WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+    border: '1px solid var(--mc-glass-border)', borderRadius: 18, overflow: 'hidden',
+    boxShadow: 'var(--mc-glow-hi), var(--mc-shadow-md)', transition: 'box-shadow .18s, transform .18s',
   };
 
   return (
