@@ -105,6 +105,51 @@ export function extractTodos(text: string): { id: string; content: string }[] {
   return todos;
 }
 
+/** 任务清单条目的实时状态。 */
+export type TodoStatus = 'pending' | 'running' | 'done' | 'stopped';
+
+/** 后端驱动的任务清单追踪器：规划阶段创建后随工具步骤推进逐个打勾，经 SSE 广播实时状态。 */
+export interface TodoTracker {
+  /** 当前带状态的全量清单（初始全 pending，随 complete() 逐个变 done）。 */
+  readonly todos: { id: string; content: string; status: TodoStatus }[];
+  /** 广播当前状态快照（初始下发 / 手动重推）。 */
+  emit(): void;
+  /** 推进一项完成（done 计数 +1 后广播；已全部完成则忽略）。 */
+  complete(): void;
+  /** 标记当前运行项为「已停止」（用户中止时用）。 */
+  stop(): void;
+  /** 收尾：剩余项全部标记完成（无工具步骤、规划即最终回答时用）。 */
+  finishAll(): void;
+}
+
+/**
+ * 创建任务清单追踪器。todos 为空时返回 null（调用方直接跳过）。
+ * 每次状态变化都整体广播 `{ sessionId, todos: [{id,content,status}] }`，
+ * 前端按后端下发的 status 渲染打勾，不再靠 step 完成数按索引硬推。
+ */
+export function createTodoTracker(
+  emit: (event: string, payload: any) => void,
+  sessionId: string,
+  todos: { id: string; content: string }[],
+): TodoTracker | null {
+  if (!todos || todos.length === 0) return null;
+  let done = 0;
+  let stopped = false;
+  const snapshot = (): TodoTracker['todos'] =>
+    todos.map((t, i) => ({
+      ...t,
+      status: i < done ? 'done' : i === done ? (stopped ? 'stopped' : 'running') : 'pending',
+    }));
+  const broadcast = () => emit('todos', { sessionId, todos: snapshot() });
+  return {
+    get todos() { return snapshot(); },
+    emit: broadcast,
+    complete: () => { if (done < todos.length) done++; broadcast(); },
+    stop: () => { stopped = true; broadcast(); },
+    finishAll: () => { done = todos.length; stopped = false; broadcast(); },
+  };
+}
+
 /** 需求澄清（grill-me 风格）：解析规划文本里的 [ASK:{json}] 标记，返回澄清问题与选项 */
 export function extractClarify(text: string): { question: string; options: string[]; allowCustom: boolean } | null {
   const m = text.match(/\[ASK:\s*(\{[\s\S]*?\})\s*\]/);

@@ -148,8 +148,10 @@ export interface InboundAttachment { name: string; path?: string; content?: stri
 /** 附件总注入字符上限，防爆上下文（buildAttachmentContext 与 readAttachmentFile 共用）。 */
 const MAX_TOTAL = 200_000;
 
-export function buildAttachmentContext(attachments?: InboundAttachment[]): string | null {
+export function buildAttachmentContext(attachments?: InboundAttachment[], opts?: { maxChars?: number }): string | null {
   if (!Array.isArray(attachments) || attachments.length === 0) return null;
+  // 默认 200KB；调用方可按模型窗口预算收紧（chat-flow 传入 maxChars）
+  const maxChars = opts?.maxChars ?? MAX_TOTAL;
   const parts: string[] = ['以下是用户在本轮对话中引用的文件，请结合这些文件的内容来回答用户的问题（引用内容仅供本次对话使用）：', ''];
   let total = 0;
   for (const a of attachments) {
@@ -164,7 +166,7 @@ export function buildAttachmentContext(attachments?: InboundAttachment[]): strin
       parts.push(`- ${a.name}${a.path ? `（路径：${a.path}）` : ''}：（无法读取内容，可能文件过大、受保护或不存在）`);
       continue;
     }
-    if (total + body.length > MAX_TOTAL) {
+    if (total + body.length > maxChars) {
       parts.push(`- ${a.name}：（内容过大已省略，仅记录路径 ${a.path || ''}）`);
       continue;
     }

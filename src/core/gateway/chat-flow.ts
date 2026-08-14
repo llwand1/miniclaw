@@ -9,18 +9,18 @@ import { AgentEngine, AgentConfig, ProviderConfig } from '../agent';
 import { ChatMessage } from '../adapter/types';
 import { v4 as uuidv4 } from 'uuid';
 import { createLogger } from '../logger';
-import { tracer } from '../trace/tracer';
 import { getWorkspaceRoot } from '../fs-tools';
 import {
   trimMarkers, extractFsTools, extractSearchQueries, extractUrls, extractMemoryTriggers,
-  extractTodos, extractClarify, extractSkillTriggers,
+  extractTodos, extractClarify, extractSkillTriggers, createTodoTracker,
 } from './parsers';
+import type { TodoTracker } from './parsers';
 import {
   getDefaultProvider, getProviderById, getSelectedModel, getSearchConfig,
   getEnabledSkills, loadSkillBodies,
 } from './providers';
 import { resolveMemoryModes, loadModeMemories } from './memory';
-import { estimateTokens } from './context';
+import { estimateTokens, getContextLimit, truncateHistoryToBudget } from './context';
 import { buildSystemPrompt as buildSystemPromptImpl, buildAttachmentContext } from './prompts';
 import { performSearches, performFetches } from './searcher';
 import { runNativeToolLoop, runFileTool } from './native-tools';
@@ -97,12 +97,31 @@ export async function runChatFlow(host: ChatFlowHost, inbound: InboundMessage): 
     db.prepare('INSERT INTO messages (session_id,role,content) VALUES (?,?,?)').run(sessionId, 'user', inbound.text);
   }
 
-  const history = db.prepare("SELECT role,content FROM messages WHERE session_id=? ORDER BY ts").all(sessionId) as ChatMessage[];
-  // 用户从对话栏「+」引用的文件：拼成系统上下文注入给模型（inline 直接带内容；path 由后端安全读取）。
-  // 单独构造 convHistory，避免污染用于记忆抽取/摘要的 history。
-  const attachmentCtx = buildAttachmentContext(inbound.attachments);
-  const convHistory: ChatMessage[] = attachmentCtx ? [{ role: 'system', content: attachmentCtx }, ...history] : history;
+  // 历史回放：连同工具调用消息（assistant 的 tool_calls JSON + tool 结果的 tool_call_id）
+  // 一并加载，使追问时模型能拿到上一轮工具执行的原始结果（已落库持久化）。
+  // ORDER BY ts, id 保证同秒内工具轮消息按插入顺序回放（ts 秒级精度不足以防乱序）。
+  const historyRows = db.prepare("SELECT role,content,tool_call_id,tool_calls FROM messages WHERE session_id=? ORDER BY ts, id").all(sessionId) as any[];
+  const history: ChatMessage[] = historyRows.map((m: any) => {
+    const msg: ChatMessage = { role: m.role as ChatMessage['role'], content: m.content };
+    if (m.tool_call_id) msg.toolCallId = m.tool_call_id;
+    if (m.tool_calls) {
+      try { msg.toolCalls = JSON.parse(m.tool_calls); } catch { /* 损坏 JSON 忽略 */ }
+    }
+    return msg;
+  });
+  // 上下文预算管理：长对话按模型窗口截断历史（保留最新），防止无条件全量注入超窗。
+  // 预算 = 窗口上限 - 系统提示 - 附件注入 - 工具/记忆/技能预留；附件也纳入窗口预算。
   const systemPrompt = buildSystemPromptImpl(inbound.text, sessionId);
+  const contextLimit = getContextLimit(provider.id, model);
+  // 附件上限：取窗口的 40%（CJK 1 字符≈1 token 的保守估）与既有 200KB 字符上限的较小者
+  const attachmentCtx = buildAttachmentContext(inbound.attachments, { maxChars: Math.min(200_000, Math.floor(contextLimit * 0.4)) });
+  const truncatedHistory = truncateHistoryToBudget(history, {
+    limit: contextLimit,
+    systemPromptTokens: estimateTokens(systemPrompt),
+    attachmentTokens: estimateTokens(attachmentCtx || ''),
+  });
+  // 单独构造 convHistory，避免污染用于记忆抽取/摘要的 history。
+  const convHistory: ChatMessage[] = attachmentCtx ? [{ role: 'system', content: attachmentCtx }, ...truncatedHistory] : truncatedHistory;
   const agent: AgentConfig = { id: 'default', name: '助手', role: 'assistant', providerId: provider.id, model, systemPrompt, enabled: true };
 
   const searchConfig = getSearchConfig();
@@ -118,14 +137,8 @@ export async function runChatFlow(host: ChatFlowHost, inbound: InboundMessage): 
   // 后台任务：记录本次生成，阶段实时广播给任务栏
   host.startRunning(sessionId, inbound.text.slice(0, 50) || '新对话', provider.id, model);
 
-  // 简易 Trace：以本次请求为根 Span，下游 LLM 调用会作为子 Span 挂上来
-  const trace = tracer.startTrace(sessionId, 'chat', { model: model || '', provider: provider.id });
-  // 实时 Trace：请求开始即推送初始 payload（含未结束的 root span），
-  // 之后每个 Span 的 start/end 增量推送 trace-span，前端边收边画、支持展开详情。
-  host.emit('trace-start', { sessionId, trace: trace.toPayload() });
-  trace.on('span', (ev: any) => {
-    host.emit('trace-span', { sessionId, phase: ev.phase, span: ev.span });
-  });
+  // 任务规划清单追踪器（声明在 try 之外，catch 里用户停止分支也要能 stop() 标记）
+  let todoTracker: TodoTracker | null = null;
 
   try {
     let reasoningFull = '';
@@ -139,21 +152,36 @@ export async function runChatFlow(host: ChatFlowHost, inbound: InboundMessage): 
     // 存在已启用技能，或用户本次手动勾选了技能，就进入「规划阶段」按需加载（WorkBuddy 式）
     const skillsEnabled = getEnabledSkills().length > 0 || manualSkills.length > 0;
 
-    // 原生 function call：工具启用时优先走「模型原生 tools 参数 → tool_calls → 执行 → 回灌」，
-    // 与下方文本标记路径（[SEARCH:]/[FS]）并行。模型实际返回 tool_calls 时整轮在
-    // runNativeToolLoop 内完成并返回 sessionId；模型没走原生工具（可能用文本标记或直接回答）
-    // 时返回 null，交还下方原有规划→工具→最终路径，保证对不支持原生 tools 的模型完全兼容。
+    // 原生 function call：工具启用时优先走「模型原生 tools 参数 → tool_calls → 执行 → 回灌」。
+    // 模型实际返回 tool_calls 时整轮在 runNativeToolLoop 内完成并返回 { kind:'completed' }；
+    // 模型没走原生工具时返回 { kind:'plan' }（探测文本可复用为规划结果，省一次 LLM 调用），
+    // 或 null（无原生工具可用）——两者都交还下方原有规划→工具→最终路径，保证对不支持原生
+    // tools 的模型完全兼容。
+    let plan: string | undefined;
+    let pt1 = 0;
+    let ct1 = 0;
     if (toolsEnabled) {
       const nativeDone = await runNativeToolLoop(host, {
         provider, agent, convHistory, temperature: temp, controller, checkAborted,
-        sessionId, trace, searchConfig, systemPrompt, history, model,
+        sessionId, searchConfig, systemPrompt, history, model,
       });
-      if (nativeDone) return nativeDone;
+      if (nativeDone) {
+        if (nativeDone.kind === 'completed') return nativeDone.sessionId;
+        // kind === 'plan'：复用探测文本作为规划结果，跳过下方重复的 generateOnce
+        plan = nativeDone.text;
+        pt1 = nativeDone.promptTokens;
+        ct1 = nativeDone.completionTokens;
+      }
     }
 
     if (toolsEnabled || skillsEnabled) {
       checkAborted();
-      const { text: plan, promptTokens: pt1, completionTokens: ct1 } = await host.generateOnce(provider, agent, convHistory, temp, controller.signal);
+      if (plan === undefined) {
+        const res = await host.generateOnce(provider, agent, convHistory, temp, controller.signal);
+        plan = res.text;
+        pt1 = res.promptTokens;
+        ct1 = res.completionTokens;
+      }
       checkAborted();
 
       const searchQueries = extractSearchQueries(plan);
@@ -166,11 +194,11 @@ export async function runChatFlow(host: ChatFlowHost, inbound: InboundMessage): 
       // 未输出标记时按「复杂任务」默认加载全模式；<<MEM:none>> 表示本任务不需要额外记忆。
       const memTriggers = extractMemoryTriggers(plan);
       // 任务规划清单（WorkBuddy 式）：解析 [TODO:...] 步骤清单并立即经 SSE 下发，
-      // 前端实时展示「任务清单」并随 step 完成逐个打勾。无论是否触发工具都下发。
-      const todos = extractTodos(plan);
-      if (todos.length > 0) {
-        host.emit('todos', { sessionId, todos });
-      }
+      // 前端实时展示「任务清单」；随后 search/fetch/fs 每步完成时 complete() 逐个打勾。
+      // 无论是否触发工具都下发；规划即最终回答时在收尾处 finishAll()。
+      const todoTrackerLocal = createTodoTracker(host.emit.bind(host), sessionId, extractTodos(plan));
+      todoTracker = todoTrackerLocal;
+      todoTrackerLocal?.emit();
 
       // 需求澄清（grill-me 风格）：模型在规划阶段输出 [ASK:{json}] 时，挂起本次生成，
       // 经 SSE 下发澄清问题与选项，等用户选择后再恢复（见 answerClarify）。
@@ -188,35 +216,38 @@ export async function runChatFlow(host: ChatFlowHost, inbound: InboundMessage): 
       if (searchQueries.length > 0 || fetchUrls.length > 0 || fsToolCalls.length > 0 || allSkillTriggers.length > 0) {
         const toolResults: string[] = [];
 
-        // 联网搜索
+        // 联网搜索（过程式：每完成一个关键词 emit 一次进度，done 带完整结果）
         if (searchQueries.length > 0) {
           host.tickRunning(sessionId, 'searching');
           const stepId = uuidv4();
-          const span = trace?.startChild('tool.call', 'tool', { tool: 'search', queries: searchQueries });
           host.emit('step', { sessionId, step: { stepId, name: '联网搜索', tool: 'search', status: 'running', args: searchQueries, startedAt: Date.now() } });
-          const results = await performSearches(searchQueries, searchConfig);
-          host.emit('step', { sessionId, step: { stepId, status: 'done', endedAt: Date.now(), result: `已搜索 ${searchQueries.length} 个关键词` } });
-          span?.end();
+          const results = await performSearches(searchQueries, searchConfig, (p) => {
+            host.emit('step', { sessionId, step: { stepId, status: 'running', progress: { done: p.done, total: p.total, item: p.item, ok: p.ok, summary: p.summary }, result: `正在搜索 ${p.done}/${p.total}…` } });
+          });
+          host.emit('step', { sessionId, step: { stepId, status: 'done', endedAt: Date.now(), result: results } });
+          todoTracker?.complete(); // 任务清单打勾：联网搜索完成
           toolResults.push(results);
         }
 
-        // 抓取网页
+        // 抓取网页（过程式：每完成一个 URL emit 一次进度，done 带完整结果）
         if (fetchUrls.length > 0) {
           host.tickRunning(sessionId, 'fetching');
           const stepId = uuidv4();
-          const span = trace?.startChild('tool.call', 'tool', { tool: 'fetch', urls: fetchUrls });
           host.emit('step', { sessionId, step: { stepId, name: '抓取网页', tool: 'fetch', status: 'running', args: fetchUrls, startedAt: Date.now() } });
-          const results = await performFetches(fetchUrls);
-          host.emit('step', { sessionId, step: { stepId, status: 'done', endedAt: Date.now(), result: `已抓取 ${fetchUrls.length} 个网页` } });
-          span?.end();
+          const results = await performFetches(fetchUrls, (p) => {
+            host.emit('step', { sessionId, step: { stepId, status: 'running', progress: { done: p.done, total: p.total, item: p.item, ok: p.ok, summary: p.summary }, result: `正在抓取 ${p.done}/${p.total}…` } });
+          });
+          host.emit('step', { sessionId, step: { stepId, status: 'done', endedAt: Date.now(), result: results } });
+          todoTracker?.complete(); // 任务清单打勾：网页抓取完成
           toolResults.push(results);
         }
 
         // 文件工具（read/grep/edit/write）
         if (fsToolCalls.length > 0) {
           for (const call of fsToolCalls) {
-            const res = await runFileTool(host, sessionId, call, trace);
+            const res = await runFileTool(host, sessionId, call);
             toolResults.push(res);
+            todoTracker?.complete(); // 任务清单打勾：单个文件工具完成
           }
         }
 
@@ -281,6 +312,7 @@ export async function runChatFlow(host: ChatFlowHost, inbound: InboundMessage): 
         const recFinalCt = finalCt || estFinalCompletion;
         db.prepare("INSERT INTO messages (session_id,role,content,tokens,reasoning,model) VALUES (?,'assistant',?,?,?,?)").run(sessionId, cleaned, recFinalCt, reasoningFull, model);
         db.prepare('INSERT INTO token_usage (agent_id,provider_id,model,prompt_tokens,completion_tokens) VALUES (?,?,?,?,?)').run(agent.id, provider.id, agent.model, recPt1 + recFinalPt, recCt1 + recFinalCt);
+        todoTracker?.finishAll(); // 任务清单收尾：剩余项全部打勾
         host.emit('token', { sessionId, content: '', done: true, model, tokens: recFinalCt });
         host.finishRunning(sessionId, true);
 
@@ -304,6 +336,7 @@ export async function runChatFlow(host: ChatFlowHost, inbound: InboundMessage): 
       const recCt1b = ct1 || estimateTokens(plan);
       db.prepare("INSERT INTO messages (session_id,role,content,tokens,reasoning,model) VALUES (?,'assistant',?,?,?,?)").run(sessionId, cleaned, recCt1b, reasoningFull, model);
       db.prepare('INSERT INTO token_usage (agent_id,provider_id,model,prompt_tokens,completion_tokens) VALUES (?,?,?,?,?)').run(agent.id, provider.id, agent.model, recPt1b, recCt1b);
+      todoTracker?.finishAll(); // 任务清单收尾：规划即回答，全部打勾
       host.emit('token', { sessionId, content: '', done: true, model, tokens: recCt1b });
       host.finishRunning(sessionId, true);
 
@@ -345,16 +378,15 @@ export async function runChatFlow(host: ChatFlowHost, inbound: InboundMessage): 
   } catch (err: any) {
     if (err.message === '__ABORTED__' || controller.signal.aborted) {
       if (host.userAbortedSessions.has(sessionId)) {
-        // 用户主动停止：广播「已停止」事件并标记 Trace 为已中止，让前端给出明确反馈
-        // （而非静默收尾），同时保留已产出的过程信息（步骤/清单/思考/部分回复）仍可见。
-        trace.setAborted();
+        // 用户主动停止：广播「已停止」事件，让前端给出明确反馈（而非静默收尾），
+        // 同时保留已产出的过程信息（步骤/清单/思考/部分回复）仍可见。
         host.emit('chat-stopped', { sessionId });
+        todoTracker?.stop(); // 任务清单：当前运行项标记「已停止」
         host.emit('token', { sessionId, content: '', done: true });
         host.finishRunning(sessionId, true, undefined, true);
       } else {
         // 服务端超时中止：必须明确报错，否则前端只收到空回复、用户完全不知道发生了什么
         const msg = '请求超时：服务端在 ' + Math.round(STREAM_TIMEOUT_MS / 1000) + ' 秒内未收到完整回复，已自动中止。可点重试，或换用响应更快的模型 / 关闭联网搜索。';
-        trace.setError(msg);
         host.emit('chat-error', { sessionId, error: msg });
         host.finishRunning(sessionId, false, msg);
         host.userAbortedSessions.delete(sessionId);
@@ -364,7 +396,6 @@ export async function runChatFlow(host: ChatFlowHost, inbound: InboundMessage): 
       return sessionId;
     }
     // 广播错误事件，驱动前端给出明确的失败反馈（而非一直转圈）
-    trace.setError(err.message || '未知错误');
     host.emit('chat-error', { sessionId, error: err.message || '未知错误' });
     host.finishRunning(sessionId, false, err.message || '未知错误');
     log.error({ sessionId, error: err.message }, 'Chat failed');
@@ -372,8 +403,5 @@ export async function runChatFlow(host: ChatFlowHost, inbound: InboundMessage): 
   } finally {
     clearTimeout(timeout);
     host.activeControllers.delete(sessionId);
-    // 结束本次 Trace 并广播给前端（瀑布面板实时刷新；同时已落库可历史回查）
-    trace.end();
-    host.emit('trace', trace.toPayload());
   }
 }

@@ -1,6 +1,7 @@
 import { getDb } from './db';
 import { getSelectedModel } from './providers';
 import { buildSystemPrompt } from './prompts';
+import type { ChatMessage } from '../adapter/types';
 
 // 常见模型的上下文窗口（tokens）映射：context 用量 UI 的「真实上限」。
 // 未知模型走 DEFAULT_CONTEXT_LIMIT 保守默认；命中按模型名精确或前缀匹配。
@@ -37,6 +38,39 @@ export function getContextLimit(providerId?: string, model?: string): number {
   const keys = Object.keys(MODEL_CONTEXT_LIMITS).sort((a, b) => b.length - a.length);
   for (const k of keys) if (m.includes(k)) return MODEL_CONTEXT_LIMITS[k];
   return DEFAULT_CONTEXT_LIMIT;
+}
+
+/**
+ * 按模型上下文窗口预算截断历史（保留最新、丢弃最旧）。
+ * 此前长对话无条件全量注入历史，必然超窗口；这里在发送前按预算裁剪：
+ * 预算 = 窗口上限 - 系统提示 - 附件注入 - 工具/记忆/技能注入预留。
+ * 始终保留最后一轮（至少一条用户消息），保证模型有上下文锚点。
+ */
+export function truncateHistoryToBudget(
+  history: ChatMessage[],
+  opts: { limit: number; systemPromptTokens: number; attachmentTokens?: number; reserveTokens?: number },
+): ChatMessage[] {
+  if (!history || history.length === 0) return history;
+  // 预留：工具结果（≤14000 字符）+ 记忆块 + 技能正文 的注入体量
+  const reserve = opts.reserveTokens ?? 20000;
+  const budget = opts.limit - opts.systemPromptTokens - (opts.attachmentTokens || 0) - reserve;
+  if (budget <= 0) {
+    // 预算极小时仍保留最后一轮（用户 + 助手），避免空上下文
+    return history.slice(-2);
+  }
+  let used = 0;
+  const kept: ChatMessage[] = [];
+  let hasUser = false;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    // toolCalls 的 JSON 也计入占用，避免截断后仍超窗
+    const t = estimateTokens((m.content || '') + (m.toolCalls ? JSON.stringify(m.toolCalls) : ''));
+    if (used + t > budget && hasUser) break;
+    kept.unshift(m);
+    used += t;
+    if (m.role === 'user') hasUser = true;
+  }
+  return kept;
 }
 
 /**

@@ -5,12 +5,14 @@
  * 若返回 tool_calls 则逐个执行并以 tool 角色回灌，直到无 tool_calls 或达到轮数上限。
  */
 import { getDb } from './db';
+import Database from 'better-sqlite3';
 import { AgentEngine, AgentConfig, ProviderConfig } from '../agent';
 import { ChatMessage, ToolDefinition, ToolCall } from '../adapter/types';
 import { v4 as uuidv4 } from 'uuid';
 import { createLogger } from '../logger';
 import { getWorkspaceRoot, fsRead, fsGrep, fsEdit, fsWrite } from '../fs-tools';
-import { trimMarkers, extractMemos, FsToolCall } from './parsers';
+import { trimMarkers, extractMemos, extractTodos, createTodoTracker, FsToolCall } from './parsers';
+import type { TodoTracker } from './parsers';
 import { estimateTokens } from './context';
 import { performSearches, performFetches } from './searcher';
 import type { SearchConfig } from '../search';
@@ -36,9 +38,8 @@ export interface NativeToolsHost {
  * 发 step 事件驱动前端「正在调用工具」卡片，调用 fs-tools 落盘/读取，
  * 可撤销的 edit/write 广播 file-change 事件（前端 diff + 一键撤销），返回给模型的结果文本。
  */
-export async function runFileTool(host: NativeToolsHost, sessionId: string, call: FsToolCall, trace: any): Promise<string> {
+export async function runFileTool(host: NativeToolsHost, sessionId: string, call: FsToolCall): Promise<string> {
   const stepId = uuidv4();
-  const span = trace?.startChild('tool.call', 'tool', { tool: call.action, path: call.path });
   const names: Record<string, string> = { read: '读取文件', grep: '搜索文件', edit: '编辑文件', write: '写入文件' };
   host.emit('step', { sessionId, step: { stepId, name: names[call.action] || call.action, tool: 'fs', status: 'running', args: [call.path], startedAt: Date.now() } });
   try {
@@ -64,12 +65,9 @@ export async function runFileTool(host: NativeToolsHost, sessionId: string, call
       });
       result = `【已写入 ${call.path}】` + (w.sandboxed ? '（已暂存沙箱，待审批）' : '');
     }
-    span?.end();
-    host.emit('step', { sessionId, step: { stepId, status: 'done', endedAt: Date.now(), result: result.slice(0, 200) } });
+    host.emit('step', { sessionId, step: { stepId, status: 'done', endedAt: Date.now(), result } });
     return result;
   } catch (err: any) {
-    span?.setError?.(err.message || '');
-    span?.end();
     host.emit('step', { sessionId, step: { stepId, status: 'error', error: err.message, endedAt: Date.now() } });
     return `【${call.action} ${call.path}】失败：${err.message}`;
   }
@@ -173,9 +171,8 @@ export function buildNativeTools(searchEnabled: boolean, workspaceConfigured: bo
 }
 
 /** 执行单个原生工具调用(解析 JSON 参数 → 复用 performSearches/performFetches/fs-tools),emit step + file-change。 */
-export async function executeNativeToolCall(host: NativeToolsHost, sessionId: string, call: ToolCall, searchConfig: SearchConfig, trace: any): Promise<string> {
+export async function executeNativeToolCall(host: NativeToolsHost, sessionId: string, call: ToolCall, searchConfig: SearchConfig): Promise<string> {
   const stepId = uuidv4();
-  const span = trace?.startChild('tool.call', 'tool', { tool: call.name, args: call.arguments });
   const args: any = (() => { try { return JSON.parse(call.arguments || '{}'); } catch { return {}; } })();
   const label: Record<string, string> = { search_web: '联网搜索', fetch_page: '抓取网页', fs_read: '读取文件', fs_grep: '搜索文件', fs_edit: '编辑文件', fs_write: '写入文件' };
   const kind = call.name.startsWith('fs_') ? 'fs' : call.name === 'fetch_page' ? 'fetch' : 'search';
@@ -184,10 +181,16 @@ export async function executeNativeToolCall(host: NativeToolsHost, sessionId: st
     let result = '';
     if (call.name === 'search_web') {
       host.tickRunning(sessionId, 'searching');
-      result = await performSearches(Array.isArray(args.queries) ? args.queries : [], searchConfig);
+      const queries = Array.isArray(args.queries) ? args.queries : [];
+      result = await performSearches(queries, searchConfig, (p) => {
+        host.emit('step', { sessionId, step: { stepId, status: 'running', progress: { done: p.done, total: p.total, item: p.item, ok: p.ok, summary: p.summary }, result: `正在搜索 ${p.done}/${p.total}…` } });
+      });
     } else if (call.name === 'fetch_page') {
       host.tickRunning(sessionId, 'fetching');
-      result = await performFetches(Array.isArray(args.urls) ? args.urls : []);
+      const urls = Array.isArray(args.urls) ? args.urls : [];
+      result = await performFetches(urls, (p) => {
+        host.emit('step', { sessionId, step: { stepId, status: 'running', progress: { done: p.done, total: p.total, item: p.item, ok: p.ok, summary: p.summary }, result: `正在抓取 ${p.done}/${p.total}…` } });
+      });
     } else if (call.name === 'fs_read') {
       const r = fsRead(String(args.path || ''));
       result = `【文件 ${args.path}】\n${r.content}` + (r.truncated ? `\n（已截断，全文 ${r.size} 字节，可用 grep 定位后读取片段）` : '');
@@ -211,29 +214,37 @@ export async function executeNativeToolCall(host: NativeToolsHost, sessionId: st
     } else {
       throw new Error(`未知工具:${call.name}`);
     }
-    span?.end();
-    host.emit('step', { sessionId, step: { stepId, status: 'done', endedAt: Date.now(), result: result.slice(0, 200) } });
+    host.emit('step', { sessionId, step: { stepId, status: 'done', endedAt: Date.now(), result } });
     return result;
   } catch (err: any) {
-    span?.setError?.(err.message || '');
-    span?.end();
     host.emit('step', { sessionId, step: { stepId, status: 'error', error: err.message, endedAt: Date.now() } });
     return `【${call.name}】失败：${err.message}`;
   }
 }
 
+/** 原生工具循环的返回契约：
+ * - { kind: 'completed', sessionId }：工具已执行并产出最终回答（或达上限强制收尾），整轮完成；
+ * - { kind: 'plan', text, promptTokens, completionTokens }：模型未走原生工具，把探测文本交给
+ *   文本标记路径复用为「规划结果」，避免网关再调一次 LLM（普通对话也少一次调用）；
+ * - null：无可用的原生工具（buildNativeTools 为空），调用方走原有路径。 */
+export type NativeToolLoopResult =
+  | { kind: 'completed'; sessionId: string }
+  | { kind: 'plan'; text: string; promptTokens: number; completionTokens: number }
+  | null;
+
 /**
  * 原生 function call 工具循环:模型带 tools 请求 → 若返回 tool_calls → 逐个执行 →
  * 以 tool 角色消息回灌结果 → 再请求 → 直到无 tool_calls 或达到 MAX_TOOL_TURNS。
- * 与现有「文本标记([SEARCH:]/[FS])」路径并行:仅当工具启用且模型实际返回原生 tool_calls 时生效;
- * 模型不返回 tool_calls(走文本标记或直接回答)时返回 null,由调用方回退原路径。
+ * 工具轮消息（assistant tool_calls + tool 结果）在最终回答确认后原子落库，
+ * 追问时历史回放能让模型看到原始工具结果；中途失败则整体不落库，避免残留孤儿 tool 消息。
+ * 模型不使用原生工具时返回 { kind: 'plan' }，由调用方复用探测文本跳过重复规划。
  */
 export async function runNativeToolLoop(host: NativeToolsHost, params: {
   provider: ProviderConfig; agent: AgentConfig; convHistory: ChatMessage[]; temperature?: number;
-  controller: AbortController; checkAborted: () => void; sessionId: string; trace: any;
+  controller: AbortController; checkAborted: () => void; sessionId: string;
   searchConfig: SearchConfig; systemPrompt: string; history: ChatMessage[]; model: string;
-}): Promise<string | null> {
-  const { provider, agent, convHistory, temperature, controller, checkAborted, sessionId, trace, searchConfig, systemPrompt, history, model } = params;
+}): Promise<NativeToolLoopResult> {
+  const { provider, agent, convHistory, temperature, controller, checkAborted, sessionId, searchConfig, systemPrompt, history, model } = params;
   const db = getDb();
   const workspaceConfigured = !!getWorkspaceRoot();
   const tools = buildNativeTools(searchConfig.enabled, workspaceConfigured);
@@ -244,6 +255,12 @@ export async function runNativeToolLoop(host: NativeToolsHost, params: {
   let promptTokens = 0;
   let completionTokens = 0;
   let executedAny = false; // 是否执行过至少一次原生 tool_calls
+  // 已执行工具轮（assistant tool_calls + tool 结果），最终答案确认后一并原子落库
+  const toolRounds: { assistant: ChatMessage; tools: ChatMessage[] }[] = [];
+  // 任务规划清单（WorkBuddy 式）：首轮探测文本里解析 [TODO:...] 并随工具完成逐个打勾。
+  // 注意与 chat-flow 文本标记路径互斥——原生路径执行了工具时在此维护并广播，
+  // 未走原生工具（返回 {kind:'plan'}）时由 chat-flow 的文本路径负责。
+  let todoTracker: TodoTracker | null = null;
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
     checkAborted();
@@ -264,43 +281,81 @@ export async function runNativeToolLoop(host: NativeToolsHost, params: {
     // 模型要求调用工具:执行后回灌,继续下一轮
     if (turnToolCalls && turnToolCalls.length > 0) {
       executedAny = true;
+      // 首次出现工具调用时,从本轮探测文本解析任务清单并下发(模型通常在规划文本里写 [TODO:...])
+      if (!todoTracker) {
+        todoTracker = createTodoTracker(host.emit.bind(host), sessionId, extractTodos(turnText));
+        todoTracker?.emit();
+      }
       const toolResults: string[] = [];
       for (const tc of turnToolCalls) {
-        const res = await executeNativeToolCall(host, sessionId, tc, searchConfig, trace);
-        toolResults.push(res);
+        const res = await executeNativeToolCall(host, sessionId, tc, searchConfig);
+        // 与文本标记路径一致:结果截断到 14k,避免多轮工具调用把上下文撑爆
+        toolResults.push(res.slice(0, 14000));
+        todoTracker?.complete(); // 任务清单打勾:单次原生工具调用完成
       }
-      messages = [
-        ...messages,
-        { role: 'assistant' as const, content: turnText, toolCalls: turnToolCalls },
-      ];
-      for (let i = 0; i < turnToolCalls.length; i++) {
-        messages.push({ role: 'tool' as const, toolCallId: turnToolCalls[i].id, content: toolResults[i] });
-      }
+      const assistantMsg: ChatMessage = { role: 'assistant', content: turnText, toolCalls: turnToolCalls };
+      const toolMsgs: ChatMessage[] = turnToolCalls.map((tc, i) => ({ role: 'tool', toolCallId: tc.id, content: toolResults[i] }));
+      toolRounds.push({ assistant: assistantMsg, tools: toolMsgs });
+      messages = [...messages, assistantMsg, ...toolMsgs];
       continue;
     }
 
-    // 模型从未调用原生工具(可能走 [SEARCH:]/[FS] 文本标记或直接回答):交还文本标记路径
-    if (!executedAny) return null;
+    // 模型从未调用原生工具(可能走 [SEARCH:]/[FS] 文本标记或直接回答):
+    // 把探测文本交还给文本标记路径当规划结果,省一次 LLM 调用
+    if (!executedAny) {
+      return { kind: 'plan', text: turnText, promptTokens, completionTokens };
+    }
 
-    // 已执行过工具:本轮为最终回答,落库收尾
+    // 已执行过工具:本轮为最终回答,原子落库(工具轮 + 最终答案)后流式输出收尾
     const cleaned = trimMarkers(turnText);
     const estPrompt = estimateTokens(systemPrompt + '\n' + history.map(m => m.role + ':' + m.content).join('\n'));
     const estCompletion = estimateTokens(cleaned);
     const recPrompt = promptTokens || estPrompt;
     const recCompletion = completionTokens || estCompletion;
-    db.prepare("INSERT INTO messages (session_id,role,content,tokens,reasoning,model) VALUES (?,'assistant',?,?,?,?)").run(sessionId, cleaned, recCompletion, reasoningFull, model);
-    db.prepare('INSERT INTO token_usage (agent_id,provider_id,model,prompt_tokens,completion_tokens) VALUES (?,?,?,?,?)').run(agent.id, provider.id, agent.model, recPrompt, recCompletion);
+    persistToolRounds(db, sessionId, toolRounds, reasoningFull, cleaned, recCompletion, model, agent, recPrompt, recCompletion);
+    // 流式输出最终回答(与文本标记路径一致):此前只发空 done,前端得等 loadSession 兜底回填,
+    // 工具路径全程无打字机效果。这里按块 emit token + 增量发布 artifact,补齐流式体验。
+    const CHUNK_SIZE = 3;
+    host.tickRunning(sessionId, 'writing');
+    for (let i = 0; i < cleaned.length; i += CHUNK_SIZE) {
+      if (controller.signal.aborted) break;
+      host.emit('token', { sessionId, content: cleaned.slice(i, i + CHUNK_SIZE), done: false });
+      if (/[\n`<>]/.test(cleaned.slice(i, i + CHUNK_SIZE))) host.publishArtifacts(sessionId, cleaned.slice(0, i + CHUNK_SIZE));
+    }
     host.emit('token', { sessionId, content: '', done: true, model, tokens: recCompletion });
+    todoTracker?.finishAll(); // 任务清单收尾:剩余项全部打勾
     host.finishRunning(sessionId, true);
-    host.publishArtifacts(sessionId, cleaned);
     host.extractMemories(history, cleaned, sessionId);
-    return sessionId;
+    return { kind: 'completed', sessionId };
   }
 
-  // 达到 MAX_TOOL_TURNS 仍未结束:强制收尾,提示用户
+  // 达到 MAX_TOOL_TURNS 仍未结束:已执行的工具轮先落库(保持上下文),并以 assistant 收尾,
+  // 避免历史以孤立的 tool 消息结尾(OpenAI 要求 tool 消息前有对应的 assistant tool_calls)。
   const msg = `工具调用已达上限(${MAX_TOOL_TURNS} 轮),已停止。请考虑让模型直接回答或调整需求。`;
-  trace?.setError?.(msg);
+  persistToolRounds(db, sessionId, toolRounds, reasoningFull, msg, 0, model, agent, 0, 0);
   host.emit('chat-error', { sessionId, error: msg });
   host.finishRunning(sessionId, false, msg);
-  return sessionId;
+  return { kind: 'completed', sessionId };
+}
+
+/** 原子落库:先写各工具轮(assistant tool_calls + tool 结果),再写最终 assistant 收尾消息 + 用量统计。 */
+function persistToolRounds(
+  db: Database.Database, sessionId: string, toolRounds: { assistant: ChatMessage; tools: ChatMessage[] }[],
+  reasoning: string, finalContent: string, finalTokens: number, model: string,
+  agent: AgentConfig, recPrompt: number, recCompletion: number,
+): void {
+  if (toolRounds.length === 0) return;
+  const run = db.transaction(() => {
+    for (const round of toolRounds) {
+      db.prepare("INSERT INTO messages (session_id,role,content,tool_calls) VALUES (?,'assistant',?,?)")
+        .run(sessionId, round.assistant.content, JSON.stringify(round.assistant.toolCalls));
+      const insTool = db.prepare("INSERT INTO messages (session_id,role,content,tool_call_id) VALUES (?,?,?,?)");
+      for (const t of round.tools) insTool.run(sessionId, t.role, t.content, t.toolCallId);
+    }
+    db.prepare("INSERT INTO messages (session_id,role,content,tokens,reasoning,model) VALUES (?,'assistant',?,?,?,?)")
+      .run(sessionId, finalContent, finalTokens, reasoning, model);
+    db.prepare('INSERT INTO token_usage (agent_id,provider_id,model,prompt_tokens,completion_tokens) VALUES (?,?,?,?,?)')
+      .run(agent.id, agent.providerId, agent.model, recPrompt, recCompletion);
+  });
+  run();
 }

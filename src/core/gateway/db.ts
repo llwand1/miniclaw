@@ -69,6 +69,8 @@ function migrate(database: Database.Database): void {
       agent_id TEXT DEFAULT '',
       source TEXT NOT NULL CHECK(source IN ('main', 'floating')),
       title TEXT NOT NULL DEFAULT '新对话',
+      parent_id TEXT,
+      root_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -172,7 +174,7 @@ function migrate(database: Database.Database): void {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    INSERT OR IGNORE INTO search_config (id, enabled) VALUES (1, 0);
+    INSERT OR IGNORE INTO search_config (id, enabled) VALUES (1, 1);
 
     CREATE TABLE IF NOT EXISTS github_oauth_config (
       id INTEGER PRIMARY KEY CHECK(id = 1),
@@ -263,6 +265,21 @@ function migrate(database: Database.Database): void {
     );
   `);
 
+  // 做题统计：每个被收藏的题目（quiz_bank + question_index）记录作答次数 / 正确次数 / 连续正确。
+  // 准确率 = correct / attempts；streak 为「连续答对」当前值（答错归零），best_streak 为历史最高。
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS quiz_stats (
+      quiz_id TEXT NOT NULL,
+      question_index INTEGER NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      correct INTEGER NOT NULL DEFAULT 0,
+      streak INTEGER NOT NULL DEFAULT 0,
+      best_streak INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (quiz_id, question_index)
+    );
+  `);
+
   // 会话置顶 / 软删除：对已有库非破坏性地补列（幂等）
   const sessionCols = (database.prepare('PRAGMA table_info(sessions)').all() as any[]).map((c) => c.name);
   if (!sessionCols.includes('pinned')) {
@@ -270,6 +287,14 @@ function migrate(database: Database.Database): void {
   }
   if (!sessionCols.includes('deleted_at')) {
     database.prepare('ALTER TABLE sessions ADD COLUMN deleted_at TEXT').run();
+  }
+  // 子对话（fork）：parent_id = 父会话 id（根会话为 NULL），root_id = 整棵树的根会话 id，
+  // 用于「对话 → 子对话」树状历史。对已有库幂等补列。
+  if (!sessionCols.includes('parent_id')) {
+    database.prepare('ALTER TABLE sessions ADD COLUMN parent_id TEXT').run();
+  }
+  if (!sessionCols.includes('root_id')) {
+    database.prepare('ALTER TABLE sessions ADD COLUMN root_id TEXT').run();
   }
 
   // messages：推理内容（深度思考折叠块），对已有库非破坏性地补列
@@ -281,6 +306,33 @@ function migrate(database: Database.Database): void {
     database.prepare('ALTER TABLE messages ADD COLUMN model TEXT').run();
   }
 
+  // messages：工具调用消息持久化——重建表放开 role 约束（支持 'tool'）并新增
+  // tool_call_id（tool 结果对应的调用 id）与 tool_calls（assistant 携带的调用 JSON）两列。
+  // 幂等：仅当建表语句还不支持 'tool' 角色时重建（不改动现有数据，列已存在则跳过）。
+  const msgDef = (database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='messages'").get() as any)?.sql || '';
+  if (!/role.*'tool'/.test(msgDef)) {
+    database.exec(`
+      CREATE TABLE messages_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system', 'tool')),
+        content TEXT NOT NULL,
+        tokens INTEGER DEFAULT 0,
+        reasoning TEXT,
+        model TEXT,
+        tool_call_id TEXT,
+        tool_calls TEXT,
+        ts TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (session_id) REFERENCES sessions(id)
+      );
+      INSERT INTO messages_new (id, session_id, role, content, tokens, reasoning, model, ts)
+        SELECT id, session_id, role, content, tokens, reasoning, model, ts FROM messages;
+      DROP TABLE messages;
+      ALTER TABLE messages_new RENAME TO messages;
+    `);
+    dbLog.info('Rebuilt messages table: role CHECK includes tool + tool_call_id/tool_calls columns');
+  }
+
   // 分享令牌表（分享任务导出会话用，幂等）
   database.exec(`
     CREATE TABLE IF NOT EXISTS session_shares (
@@ -290,28 +342,6 @@ function migrate(database: Database.Database): void {
       FOREIGN KEY (session_id) REFERENCES sessions(id)
     );
 
-    -- 简易 Trace：一次请求 = 一条 traces 记录，其下若干 spans（调用瀑布）
-    CREATE TABLE IF NOT EXISTS traces (
-      trace_id TEXT PRIMARY KEY,
-      session_id TEXT,
-      root_name TEXT NOT NULL,
-      started_at INTEGER NOT NULL,
-      ended_at INTEGER,
-      status TEXT NOT NULL DEFAULT 'ok'
-    );
-    CREATE TABLE IF NOT EXISTS spans (
-      span_id TEXT PRIMARY KEY,
-      trace_id TEXT NOT NULL,
-      parent_span_id TEXT,
-      name TEXT NOT NULL,
-      kind TEXT NOT NULL DEFAULT 'other',
-      started_at INTEGER NOT NULL,
-      ended_at INTEGER,
-      status TEXT NOT NULL DEFAULT 'ok',
-      attrs TEXT NOT NULL DEFAULT '{}'
-    );
-    CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id);
-    CREATE INDEX IF NOT EXISTS idx_traces_session ON traces(session_id);
   `);
 
   // 记忆表增量迁移：加 importance / source 两列（兼容旧库，列已存在则忽略）
