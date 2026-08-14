@@ -1,23 +1,22 @@
 import { useEffect, useState } from 'react';
 import ChatPage from './pages/ChatPage';
 import SettingsPage from './pages/SettingsPage';
-import PreviewPage from './pages/PreviewPage';
-import { IconChat, IconEye, IconSettings, IconSun, IconMoon } from './components/Icons';
+import QuizBankPage from './pages/QuizBankPage';
+import { IconChat, IconSettings, IconDatabase, IconSun, IconMoon } from './components/Icons';
 import { useTheme } from './components/ThemeContext';
 import { previewClient } from './preview/PreviewClient';
 import { notifyTaskDone, notifyChatDone } from './lib/notify';
 
-type Tab = 'chat' | 'preview' | 'settings';
+type Tab = 'chat' | 'quiz' | 'settings';
 
 const tabs: { id: Tab; label: string; icon: typeof IconChat }[] = [
   { id: 'chat', label: '对话', icon: IconChat },
-  { id: 'preview', label: '预览', icon: IconEye },
+  { id: 'quiz', label: '题库', icon: IconDatabase },
   { id: 'settings', label: '设置', icon: IconSettings },
 ];
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('chat');
-  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [iconKey, setIconKey] = useState(0);
   const { isDark, toggle } = useTheme();
 
@@ -44,11 +43,6 @@ export default function App() {
   }, []);
 
   const handleToggle = () => { setIconKey(k => k + 1); toggle(); };
-
-  const openPreview = (html: string) => {
-    setPreviewHtml(html);
-    setTab('preview');
-  };
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'system-ui, -apple-system, sans-serif', background: 'var(--bg)', transition: 'background 0.25s' }}>
@@ -82,6 +76,8 @@ export default function App() {
             const Icon = t.icon;
             return (
               <button key={t.id} onClick={() => setTab(t.id)}
+                onMouseEnter={e => { if (tab !== t.id) { e.currentTarget.style.background = 'var(--accent-soft)'; e.currentTarget.style.color = 'var(--accent)'; } }}
+                onMouseLeave={e => { if (tab !== t.id) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-3)'; } }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   padding: '7px 16px', border: 'none', borderRadius: 8,
@@ -89,7 +85,7 @@ export default function App() {
                   color: active ? 'var(--accent)' : 'var(--text-3)',
                   cursor: 'pointer', fontSize: 13, fontWeight: active ? 600 : 500,
                   boxShadow: active ? 'var(--shadow)' : 'none',
-                  transition: 'all 0.15s ease',
+                  transition: 'all 0.15s ease, transform 0.06s ease',
                 }}>
                 <Icon size={15} />
                 <span>{t.label}</span>
@@ -119,7 +115,7 @@ export default function App() {
         {/* ─── 页面内容（切 Tab 整页淡入上移过渡） ─── */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
         <div key={tab} className="page-enter" style={{ height: '100%' }}>
-          {tab === 'chat' ? <ChatPage onOpenPreview={openPreview} /> : tab === 'preview' ? <PreviewPage initialHtml={previewHtml} /> : tab === 'quiz' ? <QuizBankPage /> : <SettingsPage />}
+          {tab === 'chat' ? <ChatPage /> : tab === 'quiz' ? <QuizBankPage /> : <SettingsPage />}
         </div>
       </div>
     </div>

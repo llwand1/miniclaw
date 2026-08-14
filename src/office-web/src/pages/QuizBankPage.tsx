@@ -6,9 +6,9 @@
 // 3) 导入：粘贴文本（支持 [QUIZ] 块或 JSON）→ POST /api/quiz-bank/import 批量入库；
 // 4) 删除：每组题目可删除。
 import { useEffect, useState } from 'react';
-import { QuizCard, parseQuiz } from '../components/QuizCard';
+import { QuizCard } from '../components/QuizCard';
 import type { QuizData } from '../components/QuizCard';
-import { IconDatabase, IconDownload, IconPlus, IconTrash } from '../components/Icons';
+import { IconDatabase, IconDownload, IconTrash } from '../components/Icons';
 
 interface BankItem {
   id: string;
@@ -159,11 +159,11 @@ export default function QuizBankPage() {
                     <IconTrash size={15} />
                   </button>
                 </div>
-                {/* 练习区：展开时渲染 QuizCard（可交互做题） */}
+                {/* 练习区：展开时渲染 QuizCard（可交互做题 + 做题统计：次数/准确率/连对） */}
                 {expanded === item.id && (
                   <div style={{ padding: '6px 16px 16px', borderTop: '1px solid var(--border-light)' }}>
-                    <QuizCard data={item.data} />
-                    <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 6 }}>选择答案后点「查看答案」即可对错判定 + 看解析。</div>
+                    <QuizCard data={item.data} quizId={item.id} />
+                    <div style={{ fontSize: 11.5, color: 'var(--text-4)', marginTop: 6 }}>选择答案后点「查看答案」即可对错判定 + 看解析；每次作答都会计入本题统计。</div>
                   </div>
                 )}
               </div>
