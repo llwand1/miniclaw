@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { previewClient } from '../preview/PreviewClient';
 import type { RunningTaskFront } from '../preview/PreviewClient';
 import ChatPane from '../components/chat/ChatPane';
@@ -36,6 +36,16 @@ import type { ModelOption, OpenReq, SelectedModel, Session, SessionNode } from '
 // =========================================================================
 // ChatPage —— 外壳：侧边栏 + 分栏视图
 // =========================================================================
+
+// 在会话树中定位目标会话所在的根会话 id（用于折叠组展开）；找不到返回 null。
+function findRootId(nodes: SessionNode[], sid: string): string | null {
+  for (const n of nodes) {
+    if (n.id === sid) return n.id;
+    if (findRootId(n.children || [], sid)) return n.id;
+  }
+  return null;
+}
+
 export default function ChatPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   // 会话树（父子层级）：侧边栏树状历史渲染数据源（/api/sessions/tree）
@@ -65,8 +75,16 @@ export default function ChatPage() {
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 侧边栏会话列表：整体收起（对话太多时可折叠，仅留新对话入口）
   const [listCollapsed, setListCollapsed] = useState(false);
-  // 分组折叠：按根会话分组，collapsedGroups 记录已收起子对话的根会话 id
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  // 分组折叠：按根会话分组，collapsedGroups 记录已收起子对话的根会话 id（持久化到 localStorage）
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('mc-collapsed-groups');
+      return saved ? new Set(JSON.parse(saved) as string[]) : new Set();
+    } catch { return new Set(); }
+  });
+  // 新派生子对话的闪烁高亮 id（fork 后短暂高亮，引导用户定位新分支）
+  const [flashSid, setFlashSid] = useState<string | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toggleGroup = (id: string) => {
     setCollapsedGroups(prev => {
       const next = new Set(prev);
@@ -74,6 +92,10 @@ export default function ChatPage() {
       return next;
     });
   };
+  // 折叠状态持久化：跨会话/刷新保持用户的分支收起习惯
+  useEffect(() => {
+    try { localStorage.setItem('mc-collapsed-groups', JSON.stringify([...collapsedGroups])); } catch { /* ignore */ }
+  }, [collapsedGroups]);
 
   // 搜索历史对话（防抖 300ms）：调 /api/search 检索消息内容
   const runSearch = (q: string) => {
@@ -185,17 +207,41 @@ export default function ChatPage() {
     } catch { /* ignore */ }
   }
 
+  // 从设置页等视图切回对话视图时重新拉取模型列表：
+  // 切换服务商 / 改默认模型后，模型下拉与当前选中模型需要跟着刷新
+  useEffect(() => {
+    if (centerView === 'chat') loadModels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [centerView]);
+
   function selectModel(m: SelectedModel) {
     setSelectedModel(m);
     fetch('/api/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(m) }).catch(() => {});
   }
 
-  function refreshSessions() {
-    fetch('/api/sessions').then(r => r.json()).then(setSessions).catch(() => {});
-    // 会话树（父子层级）：侧边栏树状历史渲染用
-    fetch('/api/sessions/tree').then(r => r.json()).then((d: any) => {
-      if (d && Array.isArray(d.roots)) setSessionTree(d.roots as SessionNode[]);
-    }).catch(() => {});
+  // 刷新会话列表与树：两路请求并行、各自容错；返回 Promise 以便调用方 await 后保证列表已更新。
+  async function refreshSessions() {
+    const listP = fetch('/api/sessions').then(r => r.json()).catch(() => null);
+    const treeP = fetch('/api/sessions/tree').then(r => r.json()).catch(() => null);
+    const [list, tree] = await Promise.all([listP, treeP]);
+    if (Array.isArray(list)) setSessions(list);
+    if (tree && Array.isArray(tree.roots)) setSessionTree(tree.roots as SessionNode[]);
+  }
+
+  // fork 后的树联动：展开父根分组（折叠态下新分支会被树隐藏）、高亮闪烁新分支、刷新列表。
+  // forkSession 与 forkMemorizeTerm 等入口共用，保证「分叉 → 立即可见」的闭环。
+  function revealForkedChild(childId: string, parentId: string) {
+    const rootId = findRootId(sessionTree, parentId) || parentId;
+    setCollapsedGroups(prev => {
+      if (!prev.has(rootId)) return prev;
+      const next = new Set(prev);
+      next.delete(rootId);
+      return next;
+    });
+    setFlashSid(childId);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashSid(null), 900);
+    refreshSessions();
   }
 
   // 派生子对话（fork）：以某会话为父创建独立子会话，并立即在对话面板打开
@@ -204,9 +250,10 @@ export default function ChatPage() {
       const r = await fetch(`/api/sessions/${id}/fork`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       const d = await r.json();
       if (!r.ok || !d.id) { setToast({ msg: '派生子对话失败：' + (d.error || '') }); return; }
-      refreshSessions();
+      revealForkedChild(d.id, id);
       openInPane(d.id);
-      setToast({ msg: '已派生子对话「' + (d.title || '') + '」，可在此继续追问' });
+      const parentTitle = (sessions.find(s => s.id === id)?.title) || d.parentTitle || '父对话';
+      setToast({ msg: `已派生子对话「${d.title || ''}」（分支自「${parentTitle}」）` });
     } catch { setToast({ msg: '派生子对话失败' }); }
   }
 
@@ -217,7 +264,9 @@ export default function ChatPage() {
     setPaneInfo(p => ({ ...p, A: { sessionId: id, view: 'chat' } }));
     setOpenReq({ pane: 'A', sessionId: id, nonce: Date.now() });
   }
-  function newConversation() {
+  async function newConversation() {
+    // 先刷新会话列表（拉到最新列表），刷新完成后再进入新对话详情，避免列表与面板不同步
+    await refreshSessions();
     setCenterView('chat');
     setFocused('A');
     setPaneInfo(p => ({ ...p, A: { sessionId: null, view: 'chat' } }));
@@ -290,6 +339,7 @@ export default function ChatPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, sessionId: d.id }),
       }).catch(() => { /* 子对话由网关异步执行，失败不阻断打开 */ });
+      revealForkedChild(d.id, parentId);
       setCenterView('chat');
       storeA.openSession(d.id);
     } catch (err: any) {
@@ -338,21 +388,46 @@ export default function ChatPage() {
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, [dragging]);
 
-  // 树状历史：递归渲染会话节点（根 + 子对话缩进，分支标识 + 更多菜单）。
-  // 依赖 side-scope 状态：activeSessionIds / runningTasks / renamingId 等。
-  // 分组折叠：根会话（有 children 时）显示折叠箭头，collapsedGroups 记录已收起的根 id，收起时隐藏其子对话。
+  // 当前会话的分支路径（父链 + 自身）：分支树中高亮「当前在哪个分支、从哪分叉而来」
+  const currentPathIds = useMemo(() => {
+    const sid = storeA.sid;
+    if (!sid || sessionTree.length === 0) return new Set<string>();
+    const path: string[] = [];
+    const walk = (nodes: SessionNode[], target: string): boolean => {
+      for (const n of nodes) {
+        if (n.id === target) { path.push(n.id); return true; }
+        if (walk(n.children || [], target)) { path.push(n.id); return true; }
+      }
+      return false;
+    };
+    return walk(sessionTree, sid) ? new Set(path) : new Set();
+  }, [storeA.sid, sessionTree]);
+
+  // 所有带子对话的根会话 id：供「全部收起/展开分支」批量操作
+  const allGroupableRoots = useMemo(() => {
+    const out: string[] = [];
+    for (const n of sessionTree) if (n.children && n.children.length > 0) out.push(n.id);
+    return out;
+  }, [sessionTree]);
+
+  // 树状历史：递归渲染会话节点（根 + 子对话分支，分支圆点 + 计数徽章 + 路径高亮 + 更多菜单）。
+  // 依赖 side-scope 状态：activeSessionIds / runningTasks / renamingId / currentPathIds 等。
+  // 分组折叠：根会话（有 children 时）显示折叠箭头，collapsedGroups 记录已收起的根 id（持久化），
+  // 收起时隐藏其子对话；fork 新分支会自动展开父组并闪烁高亮（revealForkedChild）。
   const renderTreeNode = (nodes: SessionNode[]): React.ReactNode =>
     nodes.map((s) => {
       const isActive = activeSessionIds.has(s.id);
       const isRunning = runningTasks.some(t => t.sessionId === s.id && !t.done && t.phase !== 'error');
-      const indent = 6 + s.depth * 12; // 子对话逐层右缩
+      const onPath = currentPathIds.has(s.id) && !isActive; // 父链行（自身由 active 高亮）
+      const isFlash = s.id === flashSid;                     // fork 出的新分支短暂闪烁
+      const indent = 4 + s.depth * 12; // 子对话逐层右缩（分支标记列对齐根节点折叠箭头）
       const hasChildren = !!(s.children && s.children.length > 0);
       const groupCollapsed = s.depth === 0 && collapsedGroups.has(s.id);
       const showChildren = hasChildren && !groupCollapsed;
       return (
         <Fragment key={s.id}>
           <div
-            className={`mc-row ${isActive ? 'active' : ''} ${s.pinned ? 'pinned' : ''} ${renamingId === s.id ? 'renaming' : ''}`}
+            className={`mc-row ${isActive ? 'active' : ''} ${s.pinned ? 'pinned' : ''} ${renamingId === s.id ? 'renaming' : ''} ${isRunning ? 'mc-row-running' : ''} ${onPath ? 'on-path' : ''} ${isFlash ? 'flash' : ''}`}
             onClick={() => { if (renamingId !== s.id) openInPane(s.id); }}
             style={{ paddingLeft: indent, ...(renamingId === s.id ? { background: 'transparent' } : {}) }}>
             {renamingId === s.id ? (
@@ -362,7 +437,21 @@ export default function ChatPage() {
                 style={{ width: '100%', fontSize: 12, fontFamily: 'inherit', border: '1px solid var(--mc-accent)', borderRadius: 5, padding: '2px 5px', outline: 'none', background: 'var(--mc-glass-strong)', color: 'var(--mc-text)' }} />
             ) : (
               <>
-                {s.depth > 0 && <span style={{ color: 'var(--mc-pin)', display: 'flex', flexShrink: 0, fontSize: 10 }}>└</span>}
+                {/* 分支标记列：根会话=图标；子分支=横线+圆点（当前路径上的圆点实心 accent） */}
+                {s.depth > 0 ? (
+                  <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, width: 13 }}>
+                    <span style={{ width: 6, height: 1, background: 'var(--mc-hair)', flexShrink: 0 }} />
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: onPath ? 'var(--mc-accent)' : 'var(--mc-accent-soft)', border: '1.5px solid var(--mc-accent)', boxSizing: 'border-box' }} />
+                  </span>
+                ) : (
+                  <span style={{ width: 13, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {s.pinned > 0 ? (
+                      <span style={{ color: 'var(--mc-pin)', display: 'flex' }}><IconPin /></span>
+                    ) : (
+                      <span style={{ color: onPath ? 'var(--mc-accent)' : 'var(--mc-muted2)', display: 'flex' }}><IconChat /></span>
+                    )}
+                  </span>
+                )}
                 {/* 分组折叠箭头：仅根会话且带子对话时显示，点击展开/收起整组 */}
                 {hasChildren && s.depth === 0 && (
                   <button
@@ -370,7 +459,7 @@ export default function ChatPage() {
                     title={groupCollapsed ? '展开该组对话' : '收起该组对话'}
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                      width: 16, height: 16, padding: 0, border: 'none', borderRadius: 4,
+                      width: 12, height: 16, padding: 0, border: 'none', borderRadius: 4,
                       background: 'transparent', color: 'var(--mc-muted2)', cursor: 'pointer',
                       transition: 'transform .2s, background .15s, color .15s',
                       transform: groupCollapsed ? 'rotate(-90deg)' : 'none',
@@ -380,15 +469,11 @@ export default function ChatPage() {
                     <IconCaret />
                   </button>
                 )}
-                <span style={{ flex: 1, minWidth: 0, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {s.pinned > 0 ? (
-                    <span style={{ color: 'var(--mc-pin)', display: 'flex', flexShrink: 0 }}><IconPin /></span>
-                  ) : (
-                    <span style={{ color: 'var(--mc-muted2)', display: 'flex', flexShrink: 0 }}><IconChat /></span>
-                  )}
-                  <span>{s.title || '新对话'}</span>
+                <span className="mc-title" style={{ flex: 1, minWidth: 0, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{s.title || '新对话'}</span>
+                  {hasChildren && <span className="mc-branch-count" title={`${s.children.length} 个子对话`}>{s.children.length}</span>}
                   {isRunning && (
-                    <span className="mc-spin" style={{ width: 11, height: 11, borderRadius: '50%', border: '2px solid var(--mc-accent)', borderTopColor: 'transparent', flexShrink: 0 }} title="后台生成中" />
+                    <span className="mc-dots" title="回复中"><i /><i /><i /></span>
                   )}
                 </span>
                 <button className="mc-more" onClick={(e) => { e.stopPropagation(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenu(s.id, r.right - 168, r.bottom + 4); }} title="更多操作"><IconDots /></button>
@@ -432,22 +517,18 @@ export default function ChatPage() {
       {/* ─── 左屏（1 份）：对话管理 ─── */}
       <aside style={{ flex: 1, minWidth: 0, background: 'var(--mc-glass-grad)', backdropFilter: 'blur(24px) saturate(180%)', WebkitBackdropFilter: 'blur(24px) saturate(180%)', borderRight: '1px solid var(--mc-glass-border)', boxShadow: 'var(--mc-glow-hi)', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '6px', borderBottom: '1px solid var(--mc-hair)', display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {/* 新对话：绿色渐变主按钮（对齐 WorkBuddy 新建任务样式） */}
+          {/* 新对话：与左栏其它入口（搜索/文件预览/题库/设置）统一款式——透明 + hover 高亮 + 图标泛绿 + 浮动 */}
           <button onClick={newConversation} title="新对话"
+            className="mc-float"
             style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-              padding: '9px 8px', borderRadius: 9, width: '100%',
-              border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 600,
-              background: 'linear-gradient(135deg, #00B96B, #00A85F)',
-              color: '#fff',
-              boxShadow: '0 2px 8px rgba(0,185,107,.25)',
-              transition: 'transform .15s, box-shadow .15s, filter .15s',
+              display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px', borderRadius: 7,
+              border: 'none', cursor: 'pointer', fontSize: 12, textAlign: 'left', width: '100%',
+              background: 'transparent', color: 'var(--mc-text)', fontWeight: 500,
+              transition: 'background .15s, color .15s, transform .16s cubic-bezier(.2,.7,.3,1), box-shadow .16s',
             }}
-            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,185,107,.35)'; }}
-            onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,185,107,.25)'; }}
-            onMouseDown={e => { e.currentTarget.style.filter = 'brightness(.95)'; }}
-            onMouseUp={e => { e.currentTarget.style.filter = 'none'; }}>
-            <span style={{ display: 'inline-flex' }}><IconNew /></span> 新对话
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--mc-hair)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+            <span className="mc-float-icon" style={{ display: 'inline-flex', color: 'var(--mc-accent)' }}><IconNew /></span> 新对话
           </button>
 
           {/* 搜索历史对话：点击式展开（默认入口按钮，点击后才出现输入框） */}
@@ -532,6 +613,38 @@ export default function ChatPage() {
             <span style={{ display: 'inline-flex', transform: listCollapsed ? 'rotate(-90deg)' : 'none', transition: 'transform .2s' }}><IconCaret /></span>
             {listCollapsed ? `展开对话（${sessions.length}）` : '收起对话'}
           </button>
+          <span style={{ flex: 1 }} />
+          {/* 分支批量操作：全部展开 / 全部收起（仅存在带子对话的根会话时显示） */}
+          {allGroupableRoots.length > 0 && (
+            <>
+              <button
+                onClick={() => setCollapsedGroups(new Set())}
+                title="全部展开分支"
+                className="mc-float"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 3, borderRadius: 6,
+                  border: 'none', cursor: 'pointer', color: 'var(--mc-muted)',
+                  background: 'transparent', transition: 'background .15s, color .15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--mc-hair)'; e.currentTarget.style.color = 'var(--mc-accent)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--mc-muted)'; }}>
+                <span style={{ display: 'inline-flex', transform: 'rotate(-90deg)' }}><IconCaret /></span>
+              </button>
+              <button
+                onClick={() => setCollapsedGroups(new Set(allGroupableRoots))}
+                title="全部收起分支"
+                className="mc-float"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 3, borderRadius: 6,
+                  border: 'none', cursor: 'pointer', color: 'var(--mc-muted)',
+                  background: 'transparent', transition: 'background .15s, color .15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--mc-hair)'; e.currentTarget.style.color = 'var(--mc-accent)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--mc-muted)'; }}>
+                <span style={{ display: 'inline-flex', transform: 'rotate(90deg)' }}><IconCaret /></span>
+              </button>
+            </>
+          )}
         </div>
         {!listCollapsed ? (
           <div className="mc-scroll" style={{ flex: 1, overflowY: 'auto', padding: '4px 6px', display: 'flex', flexDirection: 'column', gap: 1 }}>

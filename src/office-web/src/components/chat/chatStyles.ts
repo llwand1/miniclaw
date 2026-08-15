@@ -22,20 +22,20 @@ export const MC_CSS = `
   --mc-msg-ai:#1d1d1f; --mc-bubble-ai:#e9e9eb;
 }
 [data-theme="dark"]{
-  --mc-bg:#0f1117;
-  --mc-glass:rgba(26,29,39,.56);
-  --mc-glass-strong:rgba(26,29,39,.7);
-  --mc-glass-grad:linear-gradient(160deg, rgba(48,52,70,.58), rgba(24,27,37,.42));
-  --mc-glass-border:rgba(255,255,255,.14);
-  --mc-hair:rgba(255,255,255,.08);
-  --mc-hair-soft:rgba(255,255,255,.05);
-  --mc-text:#f0f1f5; --mc-muted:#9ca3af; --mc-muted2:#6b7280;
-  --mc-accent:#34d399; --mc-accent-soft:rgba(52,211,153,.15);
+  --mc-bg:#121214;                                   /* 1. 页面全局主背景 */
+  --mc-glass:rgba(35,35,39,.62);                     /* 3. 卡片/弹窗/悬浮面板/输入框容器背景 */
+  --mc-glass-strong:rgba(35,35,39,.76);
+  --mc-glass-grad:linear-gradient(160deg, rgba(35,35,39,.62), rgba(30,30,34,.48));
+  --mc-glass-border:rgba(255,255,255,.1);
+  --mc-hair:rgba(255,255,255,.07);
+  --mc-hair-soft:rgba(255,255,255,.04);
+  --mc-text:#e8e8eb; --mc-muted:#9a9aa3; --mc-muted2:#71717a;
+  --mc-accent:#34d399; --mc-accent-soft:rgba(52,211,153,.12);
   --mc-danger:#f87171; --mc-pin:#fbbf24;
-  --mc-blue:#60a5fa; --mc-blue-soft:rgba(96,165,250,.15);
-  --mc-purple:#a78bfa; --mc-purple-soft:rgba(167,139,250,.16);
-  --mc-cyan:#22d3ee; --mc-cyan-soft:rgba(34,211,238,.14);
-  --mc-seg:rgba(255,255,255,.08);
+  --mc-blue:#60a5fa; --mc-blue-soft:rgba(96,165,250,.14);
+  --mc-purple:#a78bfa; --mc-purple-soft:rgba(167,139,250,.14);
+  --mc-cyan:#22d3ee; --mc-cyan-soft:rgba(34,211,238,.12);
+  --mc-seg:rgba(43,43,48,.55);                       /* 5. 按钮/普通组件底色 */
   --mc-shadow-sm:0 1px 2px rgba(0,0,0,.3);
   --mc-shadow-md:0 8px 24px rgba(0,0,0,.4);
   --mc-glow-hi:inset 0 1px 0 rgba(255,255,255,.12), inset 0 0 18px rgba(255,255,255,.03);
@@ -53,6 +53,12 @@ export const MC_CSS = `
 .mc-row:hover{background:var(--mc-hair);transform:translateX(2px);}
 .mc-row:active{background:var(--mc-accent-soft);transform:translateX(2px);}
 .mc-row.active{background:var(--mc-accent-soft);}
+/* 分支路径高亮：当前会话的父链行（非自身）——hair 底 + accent 标题，区别于 active 的 accent-soft 底 */
+.mc-row.on-path{background:var(--mc-hair);}
+.mc-row.on-path .mc-title{color:var(--mc-accent);}
+/* 侧边栏分支计数徽章：根会话下的子对话数量 */
+.mc-branch-count{font-size:10px;line-height:14px;padding:0 5px;border-radius:8px;background:var(--mc-seg);color:var(--mc-muted2);flex-shrink:0;font-variant-numeric:tabular-nums;}
+.mc-row:hover .mc-branch-count{color:var(--mc-accent);}
 .mc-row.pinned{border-left-color:var(--mc-pin);}
 .mc-row.removing{max-height:0;opacity:0;padding-top:0;padding-bottom:0;overflow:hidden;}
 .mc-row.flash{animation:mcFlash .55s ease;}
@@ -116,6 +122,14 @@ export const MC_CSS = `
 @keyframes mcToastIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
 @keyframes mcDotPulse{0%,80%,100%{opacity:.3;transform:scale(.8);}40%{opacity:1;transform:scale(1.2);}}
 .mc-spin{animation:mcSpin .8s linear infinite;}@keyframes mcSpin{to{transform:rotate(360deg);}}
+/* 侧边栏「正在回复」的对话行：内发光柔和呼吸（不影响 active 高亮背景与 hover 态） */
+.mc-row-running{animation:mcRowGlow 2.2s ease-in-out infinite;border-left-color:var(--mc-accent);}
+@keyframes mcRowGlow{0%,100%{box-shadow:inset 0 0 0 rgba(0,185,107,0);}50%{box-shadow:inset 0 0 12px rgba(0,185,107,.22);}}
+/* 侧边栏「回复中」三点脉冲（错峰呼吸，复用 mcDotPulse） */
+.mc-dots{display:inline-flex;gap:2px;align-items:center;flex-shrink:0;}
+.mc-dots i{width:4px;height:4px;border-radius:50%;background:var(--mc-accent);display:inline-block;animation:mcDotPulse 1.2s ease-in-out infinite;}
+.mc-dots i:nth-child(2){animation-delay:.2s;}
+.mc-dots i:nth-child(3){animation-delay:.4s;}
 /* 多文案轮播：按键淡入切换（等待/思考期提示语）——文案始终可见，不再闪回 */
 .mc-rot-in{animation:mcRotIn .5s ease both;}
 @keyframes mcRotIn{from{opacity:0;transform:translateY(3px);}to{opacity:1;transform:none;}}

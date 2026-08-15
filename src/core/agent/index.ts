@@ -38,10 +38,11 @@ export class AgentEngine {
     try {
       const list = await adapter.listModels({ baseUrl: provider.baseUrl, apiKey: provider.apiKey });
       const clean = (list || []).filter(Boolean);
-      if (!clean.includes(provider.defaultModel)) clean.unshift(provider.defaultModel);
+      // 默认模型为空(用户未填写)时不要把它塞进列表,避免下拉出现空选项
+      if (provider.defaultModel && !clean.includes(provider.defaultModel)) clean.unshift(provider.defaultModel);
       return clean;
     } catch {
-      return [provider.defaultModel];
+      return provider.defaultModel ? [provider.defaultModel] : [];
     }
   }
 

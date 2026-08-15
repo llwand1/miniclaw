@@ -55,15 +55,18 @@ export function registerProviders(r: Router, gw: Gateway): void {
       // token_usage 等表通过外键引用 providers，且未配置级联删除。
       // 数据库开启了 foreign_keys，直接删会触发 FOREIGN KEY constraint failed，
       // 导致「删除键」永远失败。这里先清理依赖记录，再删服务商。
-      const agentCount = (db.prepare('SELECT COUNT(*) as c FROM agents WHERE provider_id=?').get(req.params.id) as any).c;
-      if (agentCount > 0) {
-        return res.status(400).json({ error: '该服务商正被智能体使用，请先删除相关智能体' });
+      // 智能体引用：不拦截删除，而是把引用该服务商的 agents 自动重定向到剩余服务商；
+      // 若没有剩余服务商，则删除这些 agents（provider 已不存在，引用无法保留）。
+      const remaining = db.prepare('SELECT id FROM providers WHERE id<>? ORDER BY created_at ASC').get(req.params.id) as any;
+      if (remaining) {
+        db.prepare('UPDATE agents SET provider_id=? WHERE provider_id=?').run(remaining.id, req.params.id);
+      } else {
+        db.prepare('DELETE FROM agents WHERE provider_id=?').run(req.params.id);
       }
       // token_usage 仅记录用量统计，随服务商一起清理
       db.prepare('DELETE FROM token_usage WHERE provider_id=?').run(req.params.id);
       db.prepare('DELETE FROM providers WHERE id=?').run(req.params.id);
       // 删掉的是当前服务商时，自动把剩下的最新一个设为当前，避免出现「无可用服务商」
-      const remaining = db.prepare('SELECT id FROM providers ORDER BY created_at ASC').get() as any;
       if (remaining) gw.selectProvider(remaining.id);
       res.json({ id: req.params.id });
     } catch (err: any) {

@@ -206,7 +206,7 @@ export function registerSessions(r: Router, gw: Gateway, sessionStates?: Session
           .run(childId, parent.id);
       });
       tx();
-      res.json({ id: childId, title: finalTitle, parentId: parent.id, rootId });
+      res.json({ id: childId, title: finalTitle, parentId: parent.id, rootId, parentTitle: parent.title || '' });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

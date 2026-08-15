@@ -113,9 +113,11 @@ export default function MemorizePage({ sessionId, onForkTerm }: {
   }
 
   // ─── 背背背：开始背诵（取未掌握的优先，全掌握则全部）───
-  function startRecite() {
-    const pool = items.filter(it => !it.mastered);
-    const list = (pool.length > 0 ? pool : items).slice();
+  // category 传值时只背该任务（词本）内的词条；不传则背全部。
+  function startRecite(category?: string) {
+    const base = category ? items.filter(it => it.category === category) : items;
+    const pool = base.filter(it => !it.mastered);
+    const list = (pool.length > 0 ? pool : base).slice();
     // 简单的间隔重复：复习次数少的排前面（刚背过的沉底）
     list.sort((a, b) => a.review_count - b.review_count);
     setQueue(list);
@@ -164,6 +166,35 @@ export default function MemorizePage({ sessionId, onForkTerm }: {
 
   // 记录每张卡片的判定结果（供「再来一轮没记住的」使用）
   const [selByIndex, setSelByIndex] = useState<Record<number, boolean | null>>({});
+  // 收起/展开的任务(category)集合：空 Set = 全部收起（默认收起，点任务头展开）
+  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
+
+  function toggleTask(cat: string) {
+    setExpandedTasks(prev => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat); else next.add(cat);
+      return next;
+    });
+  }
+
+  // 每个任务的统计：词条数 / 已掌握 / 未掌握（待复习）
+  const taskStats = useMemo(() => {
+    const map: Record<string, { total: number; mastered: number }> = {};
+    for (const it of items) {
+      const s = (map[it.category] ||= { total: 0, mastered: 0 });
+      s.total++;
+      if (it.mastered === 1) s.mastered++;
+    }
+    return map;
+  }, [items]);
+
+  // 任务名候选：已有任务（词条里出现过的 category）优先，再补内置类别；供「添加词条」datalist 建议
+  const taskOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const it of items) seen.add(it.category);
+    for (const c of CATEGORIES) seen.add(c);
+    return [...seen];
+  }, [items]);
 
   function quitRecite() {
     setReciting(false);
@@ -228,10 +259,13 @@ export default function MemorizePage({ sessionId, onForkTerm }: {
                 onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-soft)'; }}
                 onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none'; }}
                 style={{ flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-muted)', color: 'var(--text)', fontSize: 13, outline: 'none', transition: 'border-color .15s, box-shadow .15s' }} />
-              <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-muted)', color: 'var(--text)', fontSize: 12.5, outline: 'none', cursor: 'pointer' }}>
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <input value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} list="mem-task-options" placeholder="任务名（如 六级高频词，可直接输入新建）"
+                onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-soft)'; }}
+                onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none'; }}
+                style={{ width: 170, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-muted)', color: 'var(--text)', fontSize: 12.5, outline: 'none', transition: 'border-color .15s, box-shadow .15s' }} />
+              <datalist id="mem-task-options">
+                {taskOptions.map(c => <option key={c} value={c} />)}
+              </datalist>
             </div>
             <textarea value={form.definition} onChange={e => setForm(f => ({ ...f, definition: e.target.value }))} placeholder="释义 / 解释（一句话即可）"
               onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-soft)'; }}
@@ -393,12 +427,43 @@ export default function MemorizePage({ sessionId, onForkTerm }: {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {Object.entries(byCategory).map(([cat, list]) => (
-              <div key={cat}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--text-4)', margin: '6px 2px', transition: 'color 0.25s' }}>
-                  {cat}
-                  <span style={{ fontSize: 10.5, padding: '0 7px', borderRadius: 8, background: 'var(--bg-muted)', color: 'var(--text-3)', transition: 'background 0.25s, color 0.25s' }}>{list.length}</span>
+            {Object.entries(byCategory).map(([cat, list]) => {
+              const ts = taskStats[cat] || { total: 0, mastered: 0 };
+              const open = expandedTasks.has(cat);
+              return (
+              <div key={cat} style={{ borderRadius: 14, background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden', transition: 'background 0.25s, border-color 0.25s' }}>
+                {/* 任务头：点击收起/展开 */}
+                <div onClick={() => toggleTask(cat)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', cursor: 'pointer', userSelect: 'none' }}>
+                  <span style={{ display: 'inline-flex', width: 30, height: 30, borderRadius: 8, background: 'var(--accent-soft)', color: 'var(--accent)', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'transform .2s', transform: open ? 'rotate(90deg)' : 'none' }}>
+                    <IconTarget size={14} />
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)', transition: 'color 0.25s' }}>{cat}</span>
+                      <span style={{ fontSize: 10.5, padding: '0 7px', borderRadius: 8, background: 'var(--bg-muted)', color: 'var(--text-3)', transition: 'background 0.25s, color 0.25s' }}>{list.length} 词</span>
+                      {ts.mastered > 0 && <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 6, background: 'var(--success-bg)', color: 'var(--success)', transition: 'background 0.25s, color 0.25s' }}>已掌握 {ts.mastered}</span>}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
+                      <div style={{ flex: 1, maxWidth: 160, height: 5, borderRadius: 3, background: 'var(--bg-muted)', overflow: 'hidden', transition: 'background 0.25s' }}>
+                        <div style={{ height: '100%', borderRadius: 3, background: 'var(--success)', width: `${ts.total ? Math.round((ts.mastered / ts.total) * 100) : 0}%`, transition: 'width .3s ease' }} />
+                      </div>
+                      <span style={{ fontSize: 10.5, color: 'var(--text-4)', whiteSpace: 'nowrap' }}>{ts.total - ts.mastered} 个待复习</span>
+                    </div>
+                  </div>
+                  {/* 背这个任务（阻止冒泡，避免触发收起/展开） */}
+                  <button onClick={e => { e.stopPropagation(); startRecite(cat); }}
+                    className="mc-float"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0, boxShadow: '0 2px 6px rgba(0,185,107,.25)', transition: 'transform .16s cubic-bezier(.2,.7,.3,1), box-shadow .16s' }}
+                    onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 10px rgba(0,185,107,.3)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,185,107,.25)'; }}>
+                    <IconTarget size={12} /> 背这个
+                  </button>
+                  <span style={{ fontSize: 12, color: 'var(--text-4)', flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
                 </div>
+                {/* 展开态：词条列表 */}
+                {open && (
+                <div style={{ padding: '2px 12px 12px' }}>
                 {list.map(it => (
                   <div key={it.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', marginBottom: 6, borderRadius: 12, background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)', transition: 'transform .16s cubic-bezier(.2,.7,.3,1), box-shadow .16s, border-color .15s, background 0.25s' }}
                     onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = 'var(--shadow-md)'; e.currentTarget.style.borderColor = 'var(--accent)'; }}
@@ -435,8 +500,11 @@ export default function MemorizePage({ sessionId, onForkTerm }: {
                     </div>
                   </div>
                 ))}
+                </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

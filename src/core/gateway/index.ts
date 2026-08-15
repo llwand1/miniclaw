@@ -125,7 +125,7 @@ export class Gateway extends EventEmitter implements ChatFlowHost {
     const provExists = db.prepare('SELECT 1 FROM providers WHERE id=?').get(defaultProvId);
     if (!provExists) {
       db.prepare('INSERT INTO providers (id,type,name,base_url,api_key,default_model,enabled) VALUES (?,?,?,?,?,?,?)')
-        .run(defaultProvId, 'openai', 'OpenAI', 'https://api.openai.com/v1', '', 'gpt-4o-mini', 1);
+        .run(defaultProvId, 'openai', 'OpenAI', 'https://api.openai.com/v1', '', '', 1);
       log.info('Seeded default provider (openai-default)');
     }
 
@@ -137,7 +137,7 @@ export class Gateway extends EventEmitter implements ChatFlowHost {
         || db.prepare('SELECT id FROM providers LIMIT 1').get()) as { id: string } | undefined;
       if (targetProv) {
         db.prepare('INSERT INTO agents (id,name,role,provider_id,model,system_prompt,enabled) VALUES (?,?,?,?,?,?,?)')
-          .run('default', '默认助手', 'assistant', targetProv.id, 'gpt-4o-mini', DEFAULT_SYSTEM_PROMPT, 1);
+          .run('default', '默认助手', 'assistant', targetProv.id, '', DEFAULT_SYSTEM_PROMPT, 1);
         log.info('Seeded default agent (default)');
       }
     }

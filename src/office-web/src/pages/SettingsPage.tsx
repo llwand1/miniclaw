@@ -41,19 +41,21 @@ export default function SettingsPage() {
               <button key={t.id} onClick={() => setTab(t.id)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '9px 12px', border: 'none', borderRadius: 8,
-                  background: active ? 'var(--accent-soft)' : 'transparent',
-                  color: active ? 'var(--accent)' : 'var(--text-3)',
+                  padding: '9px 12px', border: '1px solid transparent', borderRadius: 9,
+                  background: active ? 'var(--mc-accent-soft, var(--accent-soft))' : 'transparent',
+                  color: active ? 'var(--mc-accent, var(--accent))' : 'var(--text-3)',
                   cursor: 'pointer', fontSize: 13, fontWeight: active ? 600 : 400,
                   textAlign: 'left', width: '100%',
-                  transition: 'all 0.12s ease, transform .16s cubic-bezier(.2,.7,.3,1)',
+                  backdropFilter: active ? 'blur(10px)' : 'none', WebkitBackdropFilter: active ? 'blur(10px)' : 'none',
+                  boxShadow: active ? '0 2px 8px rgba(0,185,107,.12)' : 'none',
+                  transition: 'all 0.15s ease, transform .16s cubic-bezier(.2,.7,.3,1), box-shadow .16s, backdrop-filter .16s',
                 }}
-                onMouseEnter={e => { if (!active) { e.currentTarget.style.background = 'var(--bg-muted)'; e.currentTarget.style.transform = 'translateX(2px)'; } }}
-                onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.transform = 'none'; } }}>
+                onMouseEnter={e => { if (!active) { e.currentTarget.style.background = 'var(--mc-glass, rgba(255,255,255,.55))'; e.currentTarget.style.borderColor = 'var(--mc-glass-border, rgba(255,255,255,.45))'; e.currentTarget.style.color = 'var(--mc-accent, var(--accent))'; e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = 'var(--mc-shadow-sm, 0 2px 8px rgba(0,0,0,.08))'; e.currentTarget.style.backdropFilter = 'blur(10px)'; } }}
+                onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.color = 'var(--text-3)'; e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.backdropFilter = 'none'; } }}>
                 <Icon size={16} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                   <span>{t.label}</span>
-                  <span style={{ fontSize: 10, color: active ? 'var(--accent)' : 'var(--text-4)', fontWeight: 400, opacity: 0.7 }}>{t.desc}</span>
+                  <span style={{ fontSize: 10, color: active ? 'var(--mc-accent, var(--accent))' : 'var(--text-4)', fontWeight: 400, opacity: 0.7 }}>{t.desc}</span>
                 </div>
               </button>
             );
