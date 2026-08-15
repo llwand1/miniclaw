@@ -121,6 +121,32 @@ describe('security/approval', () => {
     expect(stats.rejectedToday).toBe(1);
   });
 
+  it('SEC-13 跨日统计:昨日处理的不计入 approvedToday/rejectedToday', () => {
+    const target = path.join(WORKSPACE, 'crossday.ts');
+    // 今天两条:一批准一拒绝
+    approvalGate('sess-7', 'chg-today-ok', target, 'crossday.ts', 'today-ok', '', 'write');
+    approvalGate('sess-7', 'chg-today-no', target, 'crossday.ts', 'today-no', '', 'write');
+    approveItem('chg-today-ok');
+    rejectItem('chg-today-no');
+    // 昨日两条:直接插入 updated_at 为昨天的记录(模拟跨天重启后统计)
+    const db = getDb();
+    const y = new Date(Date.now() - 24 * 3600_000).toISOString().slice(0, 10); // 昨天 YYYY-MM-DD
+    db.prepare(`
+      INSERT INTO approval_queue (id, session_id, action, target_path, sandbox_path, before_content, after_content, status, created_at, updated_at)
+      VALUES ('chg-yest-ok', 's-7', 'write', 'old.ts', '${WORKSPACE.replace(/\\/g, '/')}/staged-old', '', 'old-ok', 'applied', '${y} 09:00:00', '${y} 09:30:00')
+    `).run();
+    db.prepare(`
+      INSERT INTO approval_queue (id, session_id, action, target_path, sandbox_path, before_content, after_content, status, created_at, updated_at)
+      VALUES ('chg-yest-no', 's-7', 'write', 'old.ts', '${WORKSPACE.replace(/\\/g, '/')}/staged-old2', '', 'old-no', 'rejected', '${y} 10:00:00', '${y} 10:05:00')
+    `).run();
+
+    const stats = getApprovalStats();
+    // 今日只算今天的 2 条,昨日的不混入
+    expect(stats.approvedToday).toBe(1);
+    expect(stats.rejectedToday).toBe(1);
+    expect(stats.total).toBe(4);
+  });
+
   it('DEFAULT_POLICY 默认即 require_approval + sandbox(与安全文档一致)', () => {
     expect(getPolicy().approvalMode).toBe('require_approval');
     expect(getPolicy().sandboxEnabled).toBe(true);

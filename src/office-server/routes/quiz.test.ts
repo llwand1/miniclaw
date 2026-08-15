@@ -40,10 +40,10 @@ function makeServer(): Promise<{ url: string; close: () => Promise<void> }> {
 }
 
 const QUIZ_DATA = {
-  title: '数学测验',
+  title: '2026-08 数学单元测验',
   questions: [
-    { question: '1+1=?', options: { A: '1', B: '2', C: '3' }, answer: ['B'], explanation: '基本加法' },
-    { question: '2+2=?', options: { A: '3', B: '4', C: '5' }, answer: ['B'], explanation: '基本加法2' },
+    { question: '1+1=?', options: { A: '1', B: '2', C: '3' }, answer: ['B'], explanation: '基本加法', source: { kind: 'ai', title: 'AI 生成·2026-08-14' } },
+    { question: '2+2=?', options: { A: '3', B: '4', C: '5' }, answer: ['B'], explanation: '基本加法2', source: { kind: 'web', title: '2026 人教版教材', url: 'https://example.com/math/2026' } },
   ],
 };
 
@@ -72,6 +72,11 @@ describe('routes/quiz(学习助手题库路由)', () => {
       expect(mine).toBeTruthy();
       expect(mine.question_count).toBe(2);
       expect(mine.source).toBe('manual');
+      // created_at 为 SQLite 时间串格式(YYYY-MM-DD HH:MM:SS)
+      expect(mine.created_at).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+      // 题目来源字段清洗:web 来源带 url,ai 来源无 url
+      expect(mine.data.questions[1].source).toEqual({ kind: 'web', title: '2026 人教版教材', url: 'https://example.com/math/2026' });
+      expect(mine.data.questions[0].source.url).toBeUndefined();
     } finally {
       await srv.close();
     }
