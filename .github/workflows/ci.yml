@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-test:
+    name: Lint + Test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install office-web deps
+        run: cd src/office-web && npm ci
+
+      - name: Type check (tsc --noEmit)
+        run: npm run lint
+
+      - name: Run unit tests (vitest)
+        run: npm test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: lint-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install office-web deps
+        run: cd src/office-web && npm ci
+
+      - name: Build (Vite frontend + tsc backend)
+        run: npm run build

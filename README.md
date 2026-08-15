@@ -47,25 +47,30 @@ studentbuddy 是一个本地优先的 AI 助手：基于 **Express + React/Vite 
 studentbuddy/
 ├─ scripts/
 │  ├─ build.js              # 构建脚本（Vite 前端 → dist/web + tsc 后端 → dist/）
-│  └─ dev-server.ts         # Web 服务形态启动入口（Node 20）
+│  ├─ dev-server.ts         # Web 服务形态启动入口（Node 20）
+│  ├─ daily-test.cjs        # 每日冒烟测试
+│  └─ functional-e2e.cjs    # 功能级 E2E 冒烟
 ├─ src/
 │  ├─ office-server/        # Express + SSE 广播（API 服务，端口 18791）
 │  │  ├─ index.ts
-│  │  └─ routes/api.ts
+│  │  └─ routes/            # api/auth/chat/files/memories/memorize/quiz/security/...
 │  ├─ office-web/           # React 前端（Vite，构建到 dist/web）
 │  │  └─ src/pages/ChatPage.tsx   # 对话页 + Trace 面板 + 工具调用卡片
 │  ├─ core/                 # 业务逻辑核心
-│  │  ├─ gateway/           # 事件总线 + 对话编排（emit token/step/trace-*）
+│  │  ├─ gateway/           # 事件总线 + 对话编排 + 记忆/定时任务（scheduler*）
 │  │  ├─ agent/             # LLM 调用（埋 llm.completion span）
-│  │  ├─ adapter/           # OpenAI 兼容适配（含 include_usage）
-│  │  ├─ trace/             # 简易调用链 Tracer/Trace/Span
-│  │  ├─ search/            # 联网搜索 / 网页抓取
-│  │  ├─ preview.ts         # artifact 预览（iframe sandbox 分级）
-│  │  └─ db.ts              # better-sqlite3 封装 + 建表
+│  │  ├─ adapter/           # OpenAI 兼容 / Anthropic 适配
+│  │  ├─ security/          # 加密(AES-GCM/DPAPI)、审批闸门、策略、Origin 校验
+│  │  ├─ search/            # 联网搜索 / 网页抓取（可接 py-search 强化服务）
+│  │  ├─ usage/             # Token 用量统计
+│  │  ├─ upload/artifact    # 上传解析 / artifact 预览（iframe sandbox 分级）
+│  │  └─ db.ts              # better-sqlite3 封装 + 建表迁移
 │  └─ shared/               # 前后端共享类型
+├─ services/py-search/      # Python 搜索强化服务（可选，SSRF 防护）
 ├─ docs/
 │  ├─ SSE-CONTRACT.md       # SSE / HTTP 接口契约
-│  └─ ARCHITECTURE.md       # 架构深读
+│  ├─ ARCHITECTURE.md       # 架构深读
+│  └─ TESTING.md            # 测试指南（运行方式/用例清单/数据规范）
 └─ package.json
 ```
 
@@ -139,4 +144,5 @@ npm run web:dev
 
 - [`docs/SSE-CONTRACT.md`](docs/SSE-CONTRACT.md) — SSE 事件与 HTTP 接口契约（前端对接核心）
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 架构深读、数据层、事件总线
+- [`docs/TESTING.md`](docs/TESTING.md) — 测试指南：运行方式 / 14 个测试文件清单 / 用例前缀 / 时间戳与日期化数据规范 / 隔离策略
 - [docs/PROJECT-ASSESSMENT-2026-08-12.md](docs/PROJECT-ASSESSMENT-2026-08-12.md) — 项目含金量评估（多维评分 / vibe coding 横向定位 / 求职场景 / 改进优先级）
